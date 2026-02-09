@@ -29,11 +29,15 @@ mv guardrails ~/.local/bin/
 
 ### From Source
 
+> **Note**: Do not clone into your project directory. The cloned repository will remain as a nested git repo and may interfere with your project's git operations.
+
 ```bash
+cd /tmp
 git clone https://github.com/thkt/claude-guardrails.git
 cd claude-guardrails
 cargo build --release
 cp target/release/guardrails ~/.local/bin/
+cd .. && rm -rf claude-guardrails
 ```
 
 ## Usage
@@ -248,6 +252,27 @@ mkdir -p ~/.config/guardrails
 2. `./config.json` (current directory)
 3. `$XDG_CONFIG_HOME/guardrails/config.json` or `~/.config/guardrails/config.json`
 
+## Using with Existing Linters
+
+If you already run biome via lefthook, husky, or lint-staged on commit, guardrails' biome check may overlap. The two serve different purposes:
+
+| Tool              | When                | Purpose                               |
+| ----------------- | ------------------- | ------------------------------------- |
+| guardrails (hook) | On every file write | Prevent issues before they're written |
+| lefthook / husky  | On commit           | Final gate before code enters history |
+
+To disable biome in guardrails and rely on your commit hook instead:
+
+```json
+{
+  "rules": {
+    "biome": false
+  }
+}
+```
+
+This keeps guardrails' custom security rules (sensitiveFile, cryptoWeak, etc.) active while avoiding duplicate biome checks.
+
 ## Known Limitations
 
 ### Line-based rules (architecture, security, cryptoWeak, etc.)
@@ -256,7 +281,7 @@ These rules use `starts_with_comment` helper which only checks line beginnings:
 
 - **Multi-line block comments**: Lines inside block comments may not be recognized as comments.
 - **Mid-line block comment endings**: Code after `*/` on the same line may be missed.
-- **Asterisk at line start**: Lines starting with `* ` are treated as JSDoc continuations.
+- **Asterisk at line start**: Lines starting with `*` are treated as JSDoc continuations.
 
 ### Scanner-based rules (sensitiveLogging, testAssertion)
 
