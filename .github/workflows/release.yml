@@ -66,14 +66,15 @@ jobs:
           TARGET: ${{ matrix.target }}
           NAME: ${{ matrix.name }}
         run: |
-          cp "target/$TARGET/release/guardrails" "$NAME"
-          chmod +x "$NAME"
+          cp "target/$TARGET/release/guardrails" guardrails
+          chmod +x guardrails
+          tar czf "$NAME.tar.gz" guardrails
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          path: ${{ matrix.name }}.tar.gz
 
   release:
     needs: build
@@ -145,10 +146,10 @@ jobs:
           fi
 
           # Calculate checksums
-          SHA_AARCH64_DARWIN=$(sha256sum artifacts/guardrails-aarch64-apple-darwin/guardrails-aarch64-apple-darwin | cut -d' ' -f1)
-          SHA_X86_64_DARWIN=$(sha256sum artifacts/guardrails-x86_64-apple-darwin/guardrails-x86_64-apple-darwin | cut -d' ' -f1)
-          SHA_AARCH64_LINUX=$(sha256sum artifacts/guardrails-aarch64-unknown-linux-gnu/guardrails-aarch64-unknown-linux-gnu | cut -d' ' -f1)
-          SHA_X86_64_LINUX=$(sha256sum artifacts/guardrails-x86_64-unknown-linux-gnu/guardrails-x86_64-unknown-linux-gnu | cut -d' ' -f1)
+          SHA_AARCH64_DARWIN=$(sha256sum artifacts/guardrails-aarch64-apple-darwin/guardrails-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_X86_64_DARWIN=$(sha256sum artifacts/guardrails-x86_64-apple-darwin/guardrails-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_AARCH64_LINUX=$(sha256sum artifacts/guardrails-aarch64-unknown-linux-gnu/guardrails-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          SHA_X86_64_LINUX=$(sha256sum artifacts/guardrails-x86_64-unknown-linux-gnu/guardrails-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
 
           # Ensure Formula directory exists
           mkdir -p Formula

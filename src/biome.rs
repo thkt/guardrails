@@ -61,16 +61,8 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     let temp_dir = std::env::temp_dir();
     let dir = path
         .parent()
-        .filter(|p| !p.as_os_str().is_empty())
+        .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
         .unwrap_or(&temp_dir);
-
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        eprintln!(
-            "guardrails: biome: failed to create directory {:?}: {}",
-            dir, e
-        );
-        return vec![];
-    }
 
     let temp_file = match Builder::new()
         .suffix(&format!(".{}", extension))
