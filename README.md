@@ -1,11 +1,12 @@
 # claude-guardrails
 
-Code quality checker for Claude Code's PreToolCall hook. Combines biome CLI with custom rules to validate code and provide actionable fix suggestions.
+Code quality checker for Claude Code's PreToolCall hook. Combines external linters with custom rules to validate code and provide actionable fix suggestions.
 
 ## Features
 
-- **biome integration**: 300+ lint rules from [biomejs.dev](https://biomejs.dev)
-- **Custom rules**: Security patterns biome doesn't cover
+- **oxlint integration** (priority): Lint rules from [oxc.rs](https://oxc.rs) with ESLint plugin compatibility
+- **biome integration** (fallback): 300+ lint rules from [biomejs.dev](https://biomejs.dev)
+- **Custom rules**: Security patterns external linters don't cover
 - **Claude-optimized output**: Actionable fix suggestions in stderr
 
 ## Installation
@@ -61,8 +62,22 @@ Add to `~/.claude/settings.json`:
 
 ## Requirements
 
-- [biome](https://biomejs.dev) CLI installed (`brew install biome` or `npm i -g @biomejs/biome`)
-- Project's `biome.json` is automatically used if present
+Install at least one external linter (oxlint is preferred):
+
+- [oxlint](https://oxc.rs) CLI installed (`npm i -g oxlint`) — **recommended**
+- [biome](https://biomejs.dev) CLI installed (`brew install biome` or `npm i -g @biomejs/biome`) — fallback
+
+### Linter Priority
+
+guardrails uses **oxlint first**. If oxlint is not available, it falls back to biome. Only one runs per check.
+
+| Condition                             | Linter used       |
+| ------------------------------------- | ----------------- |
+| oxlint installed                      | oxlint            |
+| oxlint not installed, biome installed | biome             |
+| Neither installed                     | Custom rules only |
+
+Project config files (`oxlintrc.json`, `biome.json`) are automatically used when present.
 
 ## Custom Rules
 
@@ -104,6 +119,7 @@ mkdir -p ~/.config/guardrails
 {
   "enabled": true,
   "rules": {
+    "oxlint": true,
     "biome": true,
     "sensitiveFile": true,
     "cryptoWeak": true,
@@ -128,11 +144,37 @@ mkdir -p ~/.config/guardrails
 
 ### Examples
 
-**biome only** (disable custom rules):
+**oxlint only** (disable biome and custom rules):
 
 ```json
 {
   "rules": {
+    "oxlint": true,
+    "biome": false,
+    "sensitiveFile": false,
+    "cryptoWeak": false,
+    "sensitiveLogging": false,
+    "security": false,
+    "architecture": false,
+    "transaction": false,
+    "domAccess": false,
+    "syncIo": false,
+    "bundleSize": false,
+    "testAssertion": false,
+    "flakyTest": false,
+    "generatedFile": false,
+    "testLocation": false,
+    "naming": false
+  }
+}
+```
+
+**biome only** (disable oxlint and custom rules):
+
+```json
+{
+  "rules": {
+    "oxlint": false,
     "biome": true,
     "sensitiveFile": false,
     "cryptoWeak": false,
@@ -152,11 +194,12 @@ mkdir -p ~/.config/guardrails
 }
 ```
 
-**Custom rules only** (disable biome):
+**Custom rules only** (disable external linters):
 
 ```json
 {
   "rules": {
+    "oxlint": false,
     "biome": false
   }
 }
@@ -254,24 +297,25 @@ mkdir -p ~/.config/guardrails
 
 ## Using with Existing Linters
 
-If you already run biome via lefthook, husky, or lint-staged on commit, guardrails' biome check may overlap. The two serve different purposes:
+If you already run oxlint/biome via lefthook, husky, or lint-staged on commit, guardrails' linter checks may overlap. The two serve different purposes:
 
 | Tool              | When                | Purpose                               |
 | ----------------- | ------------------- | ------------------------------------- |
 | guardrails (hook) | On every file write | Prevent issues before they're written |
 | lefthook / husky  | On commit           | Final gate before code enters history |
 
-To disable biome in guardrails and rely on your commit hook instead:
+To disable external linters in guardrails and rely on your commit hook instead:
 
 ```json
 {
   "rules": {
+    "oxlint": false,
     "biome": false
   }
 }
 ```
 
-This keeps guardrails' custom security rules (sensitiveFile, cryptoWeak, etc.) active while avoiding duplicate biome checks.
+This keeps guardrails' custom security rules (sensitiveFile, cryptoWeak, etc.) active while avoiding duplicate linter checks.
 
 ## Known Limitations
 

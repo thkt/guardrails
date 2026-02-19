@@ -45,6 +45,8 @@ pub struct RulesConfig {
     pub sensitive_logging: bool,
     #[serde(default = "default_true")]
     pub biome: bool,
+    #[serde(default = "default_true")]
+    pub oxlint: bool,
 }
 
 impl Default for RulesConfig {
@@ -65,6 +67,7 @@ impl Default for RulesConfig {
             flaky_test: true,
             sensitive_logging: true,
             biome: true,
+            oxlint: true,
         }
     }
 }
@@ -180,6 +183,23 @@ mod tests {
         let config = Config::default();
         assert!(config.enabled);
         assert!(config.rules.sensitive_file);
+        assert!(config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn legacy_config_without_oxlint_field() {
+        let json = r#"{"rules": {"biome": false}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(!config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn config_with_oxlint_disabled() {
+        let json = r#"{"rules": {"oxlint": false}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(!config.rules.oxlint);
         assert!(config.rules.biome);
     }
 

@@ -1,5 +1,6 @@
 mod biome;
 mod config;
+mod oxlint;
 mod reporter;
 mod rules;
 mod scanner;
@@ -107,11 +108,11 @@ fn main() {
 
     let mut violations: Vec<Violation> = Vec::new();
 
-    if config.rules.biome && is_js_ts_file(&file_path) {
-        if biome::is_available() {
+    if is_js_ts_file(&file_path) {
+        if config.rules.oxlint && oxlint::is_available() {
+            violations.extend(oxlint::check(&content, &file_path));
+        } else if config.rules.biome && biome::is_available() {
             violations.extend(biome::check(&content, &file_path));
-        } else {
-            eprintln!("guardrails: biome not found in PATH, skipping biome checks");
         }
     }
 
