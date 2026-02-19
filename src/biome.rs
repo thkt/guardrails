@@ -1,3 +1,4 @@
+use crate::resolve::resolve_bin;
 use crate::rules::{Severity, Violation};
 use crate::scanner::{build_line_offsets, offset_to_line};
 use serde::Deserialize;
@@ -45,8 +46,8 @@ struct BiomeLocation {
     span: Option<Vec<u32>>,
 }
 
-pub fn is_available() -> bool {
-    Command::new("biome")
+pub fn is_available(file_path: &str) -> bool {
+    Command::new(resolve_bin("biome", file_path))
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -96,7 +97,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    let output = match Command::new("biome")
+    let output = match Command::new(resolve_bin("biome", file_path))
         .args(["lint", "--reporter=json", temp_path_str])
         .output()
     {

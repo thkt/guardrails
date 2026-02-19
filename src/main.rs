@@ -2,6 +2,7 @@ mod biome;
 mod config;
 mod oxlint;
 mod reporter;
+mod resolve;
 mod rules;
 mod scanner;
 
@@ -109,9 +110,9 @@ fn main() {
     let mut violations: Vec<Violation> = Vec::new();
 
     if is_js_ts_file(&file_path) {
-        if config.rules.oxlint && oxlint::is_available() {
+        if config.rules.oxlint && oxlint::is_available(&file_path) {
             violations.extend(oxlint::check(&content, &file_path));
-        } else if config.rules.biome && biome::is_available() {
+        } else if config.rules.biome && biome::is_available(&file_path) {
             violations.extend(biome::check(&content, &file_path));
         }
     }

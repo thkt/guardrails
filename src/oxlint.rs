@@ -1,3 +1,4 @@
+use crate::resolve::resolve_bin;
 use crate::rules::{Severity, Violation};
 use serde::Deserialize;
 use std::io::Write;
@@ -30,8 +31,8 @@ struct OxlintSpan {
     line: u32,
 }
 
-pub fn is_available() -> bool {
-    Command::new("oxlint")
+pub fn is_available(file_path: &str) -> bool {
+    Command::new(resolve_bin("oxlint", file_path))
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -81,7 +82,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    let output = match Command::new("oxlint")
+    let output = match Command::new(resolve_bin("oxlint", file_path))
         .args(["--format", "json", temp_path_str])
         .output()
     {
