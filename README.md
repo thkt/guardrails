@@ -49,14 +49,14 @@ Add to `~/.claude/settings.json`:
 
 ```json
 {
-  "hooks" : [
+  "hooks": [
     {
-      "command" : "guardrails",
-      "timeout" : 1000,
-      "type" : "command"
+      "command": "guardrails",
+      "timeout": 1000,
+      "type": "command"
     }
   ],
-  "matcher" : "Write|Edit|MultiEdit"
+  "matcher": "Write|Edit|MultiEdit"
 }
 ```
 
@@ -109,11 +109,14 @@ See `src/rules/` for custom rules that complement biome's built-in checks:
 
 ## Configuration
 
-Create `~/.config/guardrails/config.json` to customize rules:
+Place `.claude-guardrails.json` at your project root (next to `.git/`). All fields are optional — only specify what you want to override.
 
-```bash
-mkdir -p ~/.config/guardrails
-```
+**Defaults** (no config file needed):
+
+- All rules enabled
+- Blocks on `critical` and `high` severity
+
+### Schema
 
 ```json
 {
@@ -144,52 +147,12 @@ mkdir -p ~/.config/guardrails
 
 ### Examples
 
-**oxlint only** (disable biome and custom rules):
+**Minimal** (oxlint only, everything else default):
 
 ```json
 {
   "rules": {
-    "oxlint": true,
-    "biome": false,
-    "sensitiveFile": false,
-    "cryptoWeak": false,
-    "sensitiveLogging": false,
-    "security": false,
-    "architecture": false,
-    "transaction": false,
-    "domAccess": false,
-    "syncIo": false,
-    "bundleSize": false,
-    "testAssertion": false,
-    "flakyTest": false,
-    "generatedFile": false,
-    "testLocation": false,
-    "naming": false
-  }
-}
-```
-
-**biome only** (disable oxlint and custom rules):
-
-```json
-{
-  "rules": {
-    "oxlint": false,
-    "biome": true,
-    "sensitiveFile": false,
-    "cryptoWeak": false,
-    "sensitiveLogging": false,
-    "security": false,
-    "architecture": false,
-    "transaction": false,
-    "domAccess": false,
-    "syncIo": false,
-    "bundleSize": false,
-    "testAssertion": false,
-    "flakyTest": false,
-    "generatedFile": false,
-    "testLocation": false,
-    "naming": false
+    "oxlint": true
   }
 }
 ```
@@ -205,95 +168,46 @@ mkdir -p ~/.config/guardrails
 }
 ```
 
-**Security-focused** (high severity rules only):
+**Backend (Node.js/API)** — disable frontend-specific rules:
 
 ```json
 {
   "rules": {
-    "sensitiveFile": true,
-    "cryptoWeak": true,
-    "sensitiveLogging": true,
-    "security": true,
-    "architecture": false,
-    "transaction": false,
     "domAccess": false,
-    "syncIo": false,
-    "bundleSize": false,
-    "testAssertion": false,
-    "flakyTest": false,
-    "generatedFile": false,
-    "testLocation": false,
-    "naming": false
-  }
-}
-```
-
-### Project Type Presets
-
-**Frontend (React/Vue/Angular)**:
-
-```json
-{
-  "rules": {
-    "biome": true,
-    "sensitiveFile": true,
-    "cryptoWeak": true,
-    "sensitiveLogging": true,
-    "security": true,
-    "architecture": true,
-    "domAccess": true,
-    "bundleSize": true,
-    "naming": true,
-    "syncIo": false,
-    "transaction": false
-  }
-}
-```
-
-**Backend (Node.js/API)**:
-
-```json
-{
-  "rules": {
-    "biome": true,
-    "sensitiveFile": true,
-    "cryptoWeak": true,
-    "sensitiveLogging": true,
-    "security": true,
-    "architecture": true,
-    "transaction": true,
-    "syncIo": true,
-    "domAccess": false,
-    "bundleSize": false,
-    "naming": false
-  }
-}
-```
-
-**CLI/Scripts**:
-
-```json
-{
-  "rules": {
-    "biome": true,
-    "sensitiveFile": true,
-    "cryptoWeak": true,
-    "sensitiveLogging": true,
-    "security": true,
-    "architecture": false,
-    "transaction": false,
-    "domAccess": false,
-    "syncIo": false,
     "bundleSize": false
   }
 }
 ```
 
-### Config file search order
+**Block all severities**:
 
-1. Next to the binary (and parent directories)
-2. `./config.json` (current directory)
-3. `$XDG_CONFIG_HOME/guardrails/config.json` or `~/.config/guardrails/config.json`
+```json
+{
+  "severity": {
+    "blockOn": ["critical", "high", "medium", "low"]
+  }
+}
+```
+
+**Disable guardrails for a project**:
+
+```json
+{
+  "enabled": false
+}
+```
+
+### Config Resolution
+
+The config file is found by walking up from the target file to the nearest `.git` directory. If `.claude-guardrails.json` exists there, it is loaded and merged with defaults.
+
+```text
+project-root/          ← .git/ + .claude-guardrails.json here
+├── src/
+│   └── app.ts         ← file being checked → walks up to find config
+├── .git/
+└── .claude-guardrails.json
+```
 
 ## Using with Existing Linters
 
