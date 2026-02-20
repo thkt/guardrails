@@ -64,12 +64,6 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
 }
 
 fn main() {
-    let config = Config::load();
-
-    if !config.enabled {
-        std::process::exit(0);
-    }
-
     let mut input_str = String::new();
     let bytes_read = match io::stdin()
         .take(MAX_INPUT_SIZE)
@@ -106,6 +100,12 @@ fn main() {
         );
         std::process::exit(0);
     };
+
+    let config = Config::default().with_project_overrides(&file_path);
+
+    if !config.enabled {
+        std::process::exit(0);
+    }
 
     let mut violations: Vec<Violation> = Vec::new();
 
