@@ -1,3 +1,5 @@
+**English** | [日本語](README.ja.md)
+
 # claude-guardrails
 
 Code quality checker for Claude Code's PreToolCall hook. Combines external linters with custom rules to validate code and provide actionable fix suggestions.
@@ -6,7 +8,7 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 
 - **oxlint integration** (priority): Lint rules from [oxc.rs](https://oxc.rs) with ESLint plugin compatibility
 - **biome integration** (fallback): 300+ lint rules from [biomejs.dev](https://biomejs.dev)
-- **Custom rules**: Security patterns external linters don't cover
+- **Custom rules**: Security patterns external linters don't cover (JS/TS + Rust)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
 
 ## Installation
@@ -81,15 +83,22 @@ Project config files (`oxlintrc.json`, `biome.json`) are automatically used when
 
 ## Custom Rules
 
-See `src/rules/` for custom rules that complement biome's built-in checks:
+See `src/rules/` for custom rules that complement external linters.
+
+### JS/TS Rules
 
 | Rule               | Severity | Description                                     | When to disable                                  |
 | ------------------ | -------- | ----------------------------------------------- | ------------------------------------------------ |
 | `sensitiveFile`    | Critical | Blocks writes to .env, credentials.\*, \*.pem   | Never (security critical)                        |
 | `cryptoWeak`       | High     | Detects MD5, SHA1, DES, RC4 usage               | Legacy system maintenance with known constraints |
 | `sensitiveLogging` | High     | Detects password/token/secret in console.log    | Never (security critical)                        |
-| `security`         | High     | XSS vectors, unsafe APIs                        | Never (security critical)                        |
+| `security`         | High     | XSS vectors, unsafe APIs, postMessage           | Never (security critical)                        |
 | `architecture`     | High     | Layer violations (e.g., UI importing domain)    | Small projects, monoliths, or scripts            |
+| `eval`             | High     | eval(), new Function(), indirect eval           | Never (security critical)                        |
+| `hardcodedSecrets` | High     | API keys, tokens, passwords in source           | Never (security critical)                        |
+| `openRedirect`     | High     | location.href/assign with user-controlled input | Non-web projects                                 |
+| `rawHtml`          | High     | HTML concatenation with variables               | Non-web projects                                 |
+| `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                  | Development-only configs                         |
 | `transaction`      | Medium   | Multiple writes without transaction wrapper     | Non-database projects                            |
 | `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)    | Non-React projects, or vanilla JS/TS             |
 | `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop) | CLI tools, build scripts, or sync-only contexts  |
@@ -99,6 +108,15 @@ See `src/rules/` for custom rules that complement biome's built-in checks:
 | `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits         | No code generation in project                    |
 | `testLocation`     | Medium   | Test files in src/ directory                    | Co-located test strategy (tests next to source)  |
 | `naming`           | Mixed    | Naming conventions (hooks, components, types)   | Different naming conventions in team/project     |
+
+### Rust Rules
+
+| Rule          | Severity | Description                                        | When to disable                        |
+| ------------- | -------- | -------------------------------------------------- | -------------------------------------- |
+| `unsafeUsage` | Medium   | unsafe blocks/fn/impl (excludes test code)         | FFI-heavy crates, low-level libraries  |
+| `unwrapUsage` | Medium   | Excessive .unwrap() (>=3 per file, excludes tests) | CLI tools, prototypes                  |
+| `todoMacro`   | Medium   | todo!()/unimplemented!() in production code        | Early prototyping                      |
+| `cargoLock`   | Medium   | Cargo.lock in library crates                       | Binary crates (Cargo.lock is expected) |
 
 ## Exit Codes
 
@@ -137,7 +155,16 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
     "flakyTest": true,
     "generatedFile": true,
     "testLocation": true,
-    "naming": true
+    "naming": true,
+    "unsafeUsage": true,
+    "unwrapUsage": true,
+    "todoMacro": true,
+    "cargoLock": true,
+    "eval": true,
+    "hardcodedSecrets": true,
+    "httpResource": true,
+    "rawHtml": true,
+    "openRedirect": true
   },
   "severity": {
     "blockOn": ["critical", "high"]
@@ -235,10 +262,9 @@ This keeps guardrails' custom security rules (sensitiveFile, cryptoWeak, etc.) a
 
 ### Line-based rules (architecture, security, cryptoWeak, etc.)
 
-These rules use `starts_with_comment` helper which only checks line beginnings:
+These rules use `non_comment_lines()` which tracks `/* ... */` block comment state across lines and filters `//` line comments:
 
-- **Multi-line block comments**: Lines inside block comments may not be recognized as comments.
-- **Mid-line block comment endings**: Code after `*/` on the same line may be missed.
+- **String literals containing `/*` or `*/`**: Comment markers inside string literals (e.g., `let s = "/* not a comment */";`) are treated as real comment boundaries, which may cause incorrect line filtering in rare cases.
 - **Asterisk at line start**: Lines starting with `*` are treated as JSDoc continuations.
 
 ### Scanner-based rules (sensitiveLogging, testAssertion)
