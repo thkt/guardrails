@@ -221,7 +221,6 @@ mod tests {
     fn jsdoc_star_lines_filtered() {
         let content = "code\n * jsdoc line\n *\nmore";
         let lines: Vec<_> = non_comment_lines(content);
-        // `* ` and bare `*` are filtered as line comments
         assert_eq!(lines, vec![(1, "code"), (4, "more")]);
     }
 
@@ -252,7 +251,6 @@ mod tests {
     fn block_comment_with_code_before_open() {
         let content = "let x = 1; /*\ncomment body\n*/\nlet y = 2;";
         let lines: Vec<_> = non_comment_lines(content);
-        // Line 1 has code before /*, so it's included
         assert_eq!(lines, vec![(1, "let x = 1; /*"), (4, "let y = 2;")]);
     }
 
@@ -260,7 +258,6 @@ mod tests {
     fn block_comment_with_code_after_close() {
         let content = "/*\ncomment\n*/ let x = 1;\nlet y = 2;";
         let lines: Vec<_> = non_comment_lines(content);
-        // Line 3 has code after */, so it's included
         assert_eq!(lines, vec![(3, "*/ let x = 1;"), (4, "let y = 2;")]);
     }
 
