@@ -1,56 +1,12 @@
-use super::{non_comment_lines, Rule, Severity, Violation, RE_RS_FILE};
+use super::{
+    is_in_test_context, non_comment_lines, test_context_ranges, Rule, Severity, Violation,
+    RE_RS_FILE,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
 static RE_TODO_MACRO: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\b(todo|unimplemented)!\s*\(").expect("RE_TODO_MACRO"));
-
-/// Computes test-context line ranges by tracking #[test], #[cfg(test)], and `mod tests`.
-/// Known limitation: brace counting is naive and does not account for braces inside
-/// string literals or comments. This may cause incorrect range boundaries in rare cases.
-fn test_context_ranges(content: &str) -> Vec<(u32, u32)> {
-    let mut ranges = Vec::new();
-    let mut in_test = false;
-    let mut brace_depth: i32 = 0;
-    let mut test_start = 0u32;
-
-    for (idx, line) in content.lines().enumerate() {
-        let line_num = (idx + 1) as u32;
-        let trimmed = line.trim();
-
-        if !in_test
-            && (trimmed.starts_with("#[test]")
-                || trimmed.starts_with("#[cfg(test)]")
-                || trimmed.contains("mod tests"))
-        {
-            in_test = true;
-            test_start = line_num;
-            brace_depth = 0;
-        }
-
-        if in_test {
-            for ch in trimmed.chars() {
-                if ch == '{' {
-                    brace_depth += 1;
-                } else if ch == '}' {
-                    brace_depth -= 1;
-                    if brace_depth <= 0 {
-                        ranges.push((test_start, line_num));
-                        in_test = false;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if in_test {
-        let line_count = content.lines().count() as u32;
-        ranges.push((test_start, line_count));
-    }
-
-    ranges
-}
 
 pub fn rule() -> Rule {
     Rule {
@@ -60,11 +16,7 @@ pub fn rule() -> Rule {
             non_comment_lines(content)
                 .into_iter()
                 .filter(|(_, line)| RE_TODO_MACRO.is_match(line))
-                .filter(|(line_num, _)| {
-                    !test_ranges
-                        .iter()
-                        .any(|(start, end)| *line_num >= *start && *line_num <= *end)
-                })
+                .filter(|(line_num, _)| !is_in_test_context(*line_num, &test_ranges))
                 .map(|(line_num, _)| Violation {
                     rule: super::rule_id::TODO_MACRO.to_string(),
                     severity: Severity::Medium,

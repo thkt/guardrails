@@ -1,4 +1,7 @@
-use super::{non_comment_lines, Rule, Severity, Violation, RE_RS_FILE};
+use super::{
+    is_in_test_context, non_comment_lines, test_context_ranges, Rule, Severity, Violation,
+    RE_RS_FILE,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -10,9 +13,11 @@ pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_RS_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
+            let test_ranges = test_context_ranges(content);
             let unwrap_lines: Vec<(u32, &str)> = non_comment_lines(content)
                 .into_iter()
                 .filter(|(_, line)| RE_UNWRAP.is_match(line))
+                .filter(|(line_num, _)| !is_in_test_context(*line_num, &test_ranges))
                 .collect();
             if unwrap_lines.len() >= THRESHOLD {
                 return unwrap_lines
@@ -62,5 +67,19 @@ mod tests {
     fn ignores_unwrap_in_comments() {
         let content = "// a.unwrap()\n// b.unwrap()\n// c.unwrap()\nfn safe() {}";
         assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn allows_unwrap_in_tests() {
+        let content = "#[cfg(test)]\nmod tests {\n    fn t() {\n        a.unwrap();\n        b.unwrap();\n        c.unwrap();\n    }\n}";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_unwrap_outside_tests() {
+        let content = "fn prod() {\n    a.unwrap();\n    b.unwrap();\n    c.unwrap();\n}\n#[cfg(test)]\nmod tests {\n    fn t() { x.unwrap(); }\n}";
+        let v = check(content);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0].line, Some(2));
     }
 }

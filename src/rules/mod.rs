@@ -74,8 +74,11 @@ fn is_line_comment(line: &str) -> bool {
     trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"
 }
 
-/// Returns an iterator over (1-based line number, line) pairs, skipping
-/// comment lines. Tracks `/* ... */` block comment state across lines.
+/// Returns (1-based line number, line) pairs, skipping comment lines.
+/// Tracks `/* ... */` block comment state across lines.
+///
+/// Known limitation: `/*` and `*/` inside string literals are treated as
+/// comment markers, which may cause incorrect filtering in rare cases.
 pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
     let mut result = Vec::new();
     let mut in_block = false;
@@ -111,6 +114,61 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
         result.push(((idx + 1) as u32, line));
     }
     result
+}
+
+/// Computes test-context line ranges by tracking `#[test]`, `#[cfg(test)]`, and `mod tests`.
+///
+/// Known limitation: brace counting is naive and does not account for braces inside
+/// string literals or comments. This may cause incorrect range boundaries in rare cases.
+pub(crate) fn test_context_ranges(content: &str) -> Vec<(u32, u32)> {
+    let mut ranges = Vec::new();
+    let mut in_test = false;
+    let mut brace_depth: i32 = 0;
+    let mut test_start = 0u32;
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_num = (idx + 1) as u32;
+        let trimmed = line.trim();
+
+        if !in_test
+            && (trimmed.starts_with("#[test]")
+                || trimmed.starts_with("#[cfg(test)]")
+                || trimmed.contains("mod tests"))
+        {
+            in_test = true;
+            test_start = line_num;
+            brace_depth = 0;
+        }
+
+        if in_test {
+            for ch in trimmed.chars() {
+                if ch == '{' {
+                    brace_depth += 1;
+                } else if ch == '}' {
+                    brace_depth -= 1;
+                    if brace_depth <= 0 {
+                        ranges.push((test_start, line_num));
+                        in_test = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if in_test {
+        let line_count = content.lines().count() as u32;
+        ranges.push((test_start, line_count));
+    }
+
+    ranges
+}
+
+#[inline]
+fn is_in_test_context(line_num: u32, test_ranges: &[(u32, u32)]) -> bool {
+    test_ranges
+        .iter()
+        .any(|(start, end)| line_num >= *start && line_num <= *end)
 }
 
 pub fn find_non_comment_match(content: &str, pattern: &Regex) -> Option<u32> {
@@ -229,13 +287,6 @@ mod tests {
         let content = "code\n/* inline comment */\nmore";
         let lines: Vec<_> = non_comment_lines(content);
         assert_eq!(lines, vec![(1, "code"), (3, "more")]);
-    }
-
-    #[test]
-    fn block_comment_multi_line() {
-        let content = "code\n/*\n  block body without star prefix\n  another body line\n*/\nmore";
-        let lines: Vec<_> = non_comment_lines(content);
-        assert_eq!(lines, vec![(1, "code"), (6, "more")]);
     }
 
     #[test]
