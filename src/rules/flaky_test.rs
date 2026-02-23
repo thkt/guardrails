@@ -62,7 +62,7 @@ pub fn rule() -> Rule {
             for pattern in FLAKY_PATTERNS.iter() {
                 if let Some(line_num) = find_non_comment_match(content, pattern.pattern) {
                     violations.push(Violation {
-                        rule: "flaky-test".to_string(),
+                        rule: super::rule_id::FLAKY_TEST.to_string(),
                         severity: Severity::Low,
                         failure: format!(
                             "{} can cause flaky tests. {}",

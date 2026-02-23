@@ -1,22 +1,57 @@
 mod architecture;
 mod bundle_size;
+mod cargo_lock;
 mod crypto_weak;
 mod dom_access;
+mod eval;
 mod flaky_test;
 mod generated_file;
+mod hardcoded_secrets;
+mod http_resource;
 mod naming;
+mod open_redirect;
+mod raw_html;
 mod security;
 mod sensitive_file;
 mod sensitive_logging;
 mod sync_io;
 mod test_assertion;
 mod test_location;
+mod todo_macro;
 mod transaction;
+mod unsafe_usage;
+mod unwrap_usage;
 
 use crate::config::Config;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
+
+pub(crate) mod rule_id {
+    pub const SENSITIVE_FILE: &str = "sensitive-file";
+    pub const ARCHITECTURE: &str = "architecture";
+    pub const NAMING_CONVENTION: &str = "naming-convention";
+    pub const TRANSACTION_BOUNDARY: &str = "transaction-boundary";
+    pub const SECURITY: &str = "security";
+    pub const CRYPTO_WEAK: &str = "crypto-weak";
+    pub const GENERATED_FILE: &str = "generated-file";
+    pub const TEST_LOCATION: &str = "test-location";
+    pub const DOM_ACCESS: &str = "dom-access";
+    pub const SYNC_IO: &str = "sync-io";
+    pub const BUNDLE_SIZE: &str = "bundle-size";
+    pub const TEST_ASSERTION: &str = "test-assertion";
+    pub const FLAKY_TEST: &str = "flaky-test";
+    pub const SENSITIVE_LOGGING: &str = "sensitive-logging";
+    pub const UNSAFE_USAGE: &str = "unsafe-usage";
+    pub const UNWRAP_USAGE: &str = "unwrap-usage";
+    pub const TODO_MACRO: &str = "todo-macro";
+    pub const CARGO_LOCK: &str = "cargo-lock";
+    pub const EVAL: &str = "eval";
+    pub const HARDCODED_SECRET: &str = "hardcoded-secret";
+    pub const HTTP_RESOURCE: &str = "http-resource";
+    pub const RAW_HTML: &str = "raw-html";
+    pub const OPEN_REDIRECT: &str = "open-redirect";
+}
 
 pub static RE_JS_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
@@ -24,12 +59,15 @@ pub static RE_JS_FILE: Lazy<Regex> =
 pub static RE_TEST_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
+pub static RE_RS_FILE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.rs$").expect("RE_RS_FILE: invalid regex"));
+
 pub static RE_ALL_FILES: Lazy<Regex> =
     Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
 
-/// Returns true if the line starts with a comment marker (does not detect inline comments).
-/// Note: For JSDoc-style block comments, only matches `* ` (with space) or bare `*` lines
-/// to avoid false positives on multiplication expressions like `x * y`.
+/// Matches comment-start markers, not inline comments.
+/// For JSDoc block comments, only matches `* ` (with space) or bare `*` lines
+/// to avoid false positives on multiplication like `x * y`.
 #[inline]
 fn starts_with_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
@@ -39,7 +77,6 @@ fn starts_with_comment(line: &str) -> bool {
         || trimmed == "*"
 }
 
-/// Returns non-comment lines with 1-based line numbers.
 #[inline]
 pub(crate) fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
     content
@@ -104,51 +141,38 @@ impl Rule {
     }
 }
 
+macro_rules! register_rules {
+    ($config:expr, $rules:expr, $( $field:ident => $module:ident ),* $(,)?) => {
+        $(if $config.rules.$field { $rules.push($module::rule()); })*
+    };
+}
+
 pub fn load_rules(config: &Config) -> Vec<Rule> {
     let mut rules = Vec::new();
-
-    if config.rules.sensitive_file {
-        rules.push(sensitive_file::rule());
-    }
-    if config.rules.architecture {
-        rules.push(architecture::rule());
-    }
-    if config.rules.naming {
-        rules.push(naming::rule());
-    }
-    if config.rules.transaction {
-        rules.push(transaction::rule());
-    }
-    if config.rules.security {
-        rules.push(security::rule());
-    }
-    if config.rules.crypto_weak {
-        rules.push(crypto_weak::rule());
-    }
-    if config.rules.generated_file {
-        rules.push(generated_file::rule());
-    }
-    if config.rules.test_location {
-        rules.push(test_location::rule());
-    }
-    if config.rules.dom_access {
-        rules.push(dom_access::rule());
-    }
-    if config.rules.sync_io {
-        rules.push(sync_io::rule());
-    }
-    if config.rules.bundle_size {
-        rules.push(bundle_size::rule());
-    }
-    if config.rules.test_assertion {
-        rules.push(test_assertion::rule());
-    }
-    if config.rules.flaky_test {
-        rules.push(flaky_test::rule());
-    }
-    if config.rules.sensitive_logging {
-        rules.push(sensitive_logging::rule());
-    }
-
+    register_rules!(config, rules,
+        sensitive_file    => sensitive_file,
+        architecture      => architecture,
+        naming            => naming,
+        transaction       => transaction,
+        security          => security,
+        crypto_weak       => crypto_weak,
+        generated_file    => generated_file,
+        test_location     => test_location,
+        dom_access        => dom_access,
+        sync_io           => sync_io,
+        bundle_size       => bundle_size,
+        test_assertion    => test_assertion,
+        flaky_test        => flaky_test,
+        sensitive_logging => sensitive_logging,
+        unsafe_usage      => unsafe_usage,
+        unwrap_usage      => unwrap_usage,
+        todo_macro        => todo_macro,
+        cargo_lock        => cargo_lock,
+        eval              => eval,
+        hardcoded_secrets => hardcoded_secrets,
+        http_resource     => http_resource,
+        raw_html          => raw_html,
+        open_redirect     => open_redirect,
+    );
     rules
 }

@@ -101,7 +101,13 @@ fn main() {
         std::process::exit(0);
     };
 
-    let config = Config::default().with_project_overrides(&file_path);
+    let config = match Config::default().with_project_overrides(&file_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("guardrails: error: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     if !config.enabled {
         std::process::exit(0);

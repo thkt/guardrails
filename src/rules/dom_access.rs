@@ -64,7 +64,7 @@ pub fn rule() -> Rule {
             for access in DOM_ACCESS.iter() {
                 if let Some(line_num) = find_non_comment_match(content, access.pattern) {
                     violations.push(Violation {
-                        rule: "dom-access".to_string(),
+                        rule: super::rule_id::DOM_ACCESS.to_string(),
                         severity: Severity::Medium,
                         failure: format!(
                             "Avoid {} in React. Use useRef or React state instead.",

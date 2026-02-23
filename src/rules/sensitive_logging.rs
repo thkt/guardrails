@@ -117,7 +117,7 @@ pub fn rule() -> Rule {
                         let line_num = offset_to_line(&line_offsets, caps.start());
                         if reported_lines.insert(line_num) {
                             violations.push(Violation {
-                                rule: "sensitive-logging".to_string(),
+                                rule: super::rule_id::SENSITIVE_LOGGING.to_string(),
                                 severity: Severity::High,
                                 failure: msg.to_string(),
                                 file: file_path.to_string(),

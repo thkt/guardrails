@@ -88,7 +88,7 @@ pub fn rule() -> Rule {
                 }
                 if let Some(line_num) = find_non_comment_match(content, issue.pattern) {
                     violations.push(Violation {
-                        rule: "naming-convention".to_string(),
+                        rule: super::rule_id::NAMING_CONVENTION.to_string(),
                         severity: issue.severity,
                         failure: issue.failure.to_string(),
                         file: file_path.to_string(),

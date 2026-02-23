@@ -1,4 +1,4 @@
-use super::{find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
+use super::{non_comment_lines, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -7,10 +7,13 @@ static RE_HTML_FILE: Lazy<Regex> =
 
 static RE_DOC_WRITE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"document\.write\s*\(").expect("RE_DOC_WRITE: invalid regex"));
-static RE_INNER_HTML: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.innerHTML\s*=").expect("RE_INNER_HTML: invalid regex"));
-static RE_OUTER_HTML: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.outerHTML\s*=").expect("RE_OUTER_HTML: invalid regex"));
+// Match innerHTML/outerHTML assignment to non-literal values (exclude string literals)
+static RE_INNER_HTML: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"\.innerHTML\s*=\s*[^"'`\s;]"#).expect("RE_INNER_HTML: invalid regex")
+});
+static RE_OUTER_HTML: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"\.outerHTML\s*=\s*[^"'`\s;]"#).expect("RE_OUTER_HTML: invalid regex")
+});
 static RE_SET_TIMEOUT_STR: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"setTimeout\s*\(\s*['"`]"#).expect("RE_SET_TIMEOUT_STR: invalid regex")
 });
@@ -90,7 +93,7 @@ static SECURITY_ISSUES: [SecurityIssue; 8] = [
 
 pub fn rule() -> Rule {
     Rule {
-        file_pattern: RE_HTML_FILE.clone(),
+        file_pattern: RE_ALL_FILES.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
             let mut violations = Vec::new();
 
@@ -98,14 +101,16 @@ pub fn rule() -> Rule {
                 if !issue.file_pattern.is_match(file_path) {
                     continue;
                 }
-                if let Some(line_num) = find_non_comment_match(content, issue.pattern) {
-                    violations.push(Violation {
-                        rule: "security".to_string(),
-                        severity: issue.severity,
-                        failure: issue.failure.to_string(),
-                        file: file_path.to_string(),
-                        line: Some(line_num),
-                    });
+                for (line_num, line) in non_comment_lines(content) {
+                    if issue.pattern.is_match(line) {
+                        violations.push(Violation {
+                            rule: super::rule_id::SECURITY.to_string(),
+                            severity: issue.severity,
+                            failure: issue.failure.to_string(),
+                            file: file_path.to_string(),
+                            line: Some(line_num),
+                        });
+                    }
                 }
             }
 
@@ -165,5 +170,66 @@ mod tests {
         for (content, path) in cases {
             assert!(check(content, path).is_empty());
         }
+    }
+
+    // FR-006: innerHTML/outerHTML string literal exclusion
+    #[test]
+    fn allows_innerhtml_string_literal() {
+        // T-032: el.innerHTML = "<div>static</div>" should NOT be flagged
+        let content = r#"el.innerHTML = "<div>static</div>";"#;
+        assert!(
+            check(content, "/src/component.tsx").is_empty(),
+            "String literal innerHTML should not be flagged"
+        );
+    }
+
+    #[test]
+    fn detects_innerhtml_variable() {
+        // T-033: el.innerHTML = variable should still be flagged
+        let content = "el.innerHTML = variable;";
+        assert!(
+            !check(content, "/src/component.tsx").is_empty(),
+            "Variable innerHTML should be flagged"
+        );
+    }
+
+    #[test]
+    fn allows_outerhtml_string_literal() {
+        // T-034: el.outerHTML = "..." should NOT be flagged
+        let content = r#"el.outerHTML = "<span>text</span>";"#;
+        assert!(
+            check(content, "/src/component.tsx").is_empty(),
+            "String literal outerHTML should not be flagged"
+        );
+    }
+
+    #[test]
+    fn detects_outerhtml_variable() {
+        // T-035: el.outerHTML = variable should still be flagged
+        let content = "el.outerHTML = variable;";
+        assert!(
+            !check(content, "/src/component.tsx").is_empty(),
+            "Variable outerHTML should be flagged"
+        );
+    }
+
+    // TC-001: dedicated document.write() detection test
+    #[test]
+    fn detects_document_write() {
+        let v = check("document.write(userInput);", "/src/render.tsx");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].severity, Severity::High);
+        assert!(v[0].failure.contains("createElement"));
+    }
+
+    // SEC-003: innerHTML bypass via "" + variable (known limitation)
+    #[test]
+    fn innerhtml_empty_string_concat_not_detected() {
+        // Known limitation: `"" + variable` starts with quote, so regex excludes it
+        let content = r#"el.innerHTML = "" + userInput;"#;
+        assert!(
+            check(content, "/src/component.tsx").is_empty(),
+            "Known limitation: empty string concat bypasses detection"
+        );
     }
 }

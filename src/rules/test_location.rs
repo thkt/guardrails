@@ -24,7 +24,7 @@ pub fn rule() -> Rule {
             for pattern in TEST_PATTERNS.iter() {
                 if pattern.is_match(file_path) {
                     return vec![Violation {
-                        rule: "test-location".to_string(),
+                        rule: super::rule_id::TEST_LOCATION.to_string(),
                         severity: Severity::Medium,
                         failure:
                             "Test files should be in tests/ or __tests__/ directory outside src/"

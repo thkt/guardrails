@@ -62,7 +62,7 @@ pub fn rule() -> Rule {
             for crypto in WEAK_CRYPTO.iter() {
                 if let Some(line_num) = find_non_comment_match(content, crypto.pattern) {
                     violations.push(Violation {
-                        rule: "crypto-weak".to_string(),
+                        rule: super::rule_id::CRYPTO_WEAK.to_string(),
                         severity: Severity::High,
                         failure: format!(
                             "{} is cryptographically weak. {}",

@@ -58,7 +58,7 @@ pub fn rule() -> Rule {
                 }
                 if let Some(line_num) = find_non_comment_match(content, v.importing) {
                     result.push(Violation {
-                        rule: "architecture".to_string(),
+                        rule: super::rule_id::ARCHITECTURE.to_string(),
                         severity: Severity::High,
                         failure: v.failure.to_string(),
                         file: file_path.to_string(),

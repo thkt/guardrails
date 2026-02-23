@@ -39,7 +39,7 @@ pub fn rule() -> Rule {
             }
 
             vec![Violation {
-                rule: "transaction-boundary".to_string(),
+                rule: super::rule_id::TRANSACTION_BOUNDARY.to_string(),
                 severity: Severity::Medium,
                 failure: format!(
                     "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {} write ops detected",

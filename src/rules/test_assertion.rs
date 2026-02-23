@@ -65,7 +65,7 @@ pub fn rule() -> Rule {
                 let line_num = offset_to_line(&line_offsets, test_start);
 
                 violations.push(Violation {
-                    rule: "test-assertion".to_string(),
+                    rule: super::rule_id::TEST_ASSERTION.to_string(),
                     severity: Severity::Medium,
                     failure: format!(
                         "Test '{}' has no assertions. Add expect() or assert calls.",

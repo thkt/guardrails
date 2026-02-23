@@ -22,7 +22,7 @@ pub fn rule() -> Rule {
         checker: Box::new(|_content: &str, file_path: &str| {
             if SENSITIVE_PATTERNS.iter().any(|p| p.is_match(file_path)) {
                 return vec![Violation {
-                    rule: "sensitive-file".to_string(),
+                    rule: super::rule_id::SENSITIVE_FILE.to_string(),
                     severity: Severity::Critical,
                     failure: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
                     file: file_path.to_string(),

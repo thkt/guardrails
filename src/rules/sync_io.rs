@@ -80,7 +80,7 @@ pub fn rule() -> Rule {
             for io in SYNC_IO.iter() {
                 if let Some(line_num) = find_non_comment_match(content, io.pattern) {
                     violations.push(Violation {
-                        rule: "sync-io".to_string(),
+                        rule: super::rule_id::SYNC_IO.to_string(),
                         severity: Severity::Medium,
                         failure: format!(
                             "{} blocks the event loop. Use {} instead.",

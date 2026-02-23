@@ -70,7 +70,7 @@ pub fn rule() -> Rule {
             for import in LARGE_IMPORTS.iter() {
                 if let Some(line_num) = find_non_comment_match(content, import.pattern) {
                     violations.push(Violation {
-                        rule: "bundle-size".to_string(),
+                        rule: super::rule_id::BUNDLE_SIZE.to_string(),
                         severity: Severity::Medium,
                         failure: format!(
                             "Full {} import increases bundle size. {}",
