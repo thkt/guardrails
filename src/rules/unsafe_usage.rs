@@ -10,6 +10,7 @@ pub fn rule() -> Rule {
         file_pattern: RE_RS_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
             non_comment_lines(content)
+                .into_iter()
                 .filter(|(_, line)| RE_UNSAFE.is_match(line))
                 .map(|(line_num, _)| Violation {
                     rule: super::rule_id::UNSAFE_USAGE.to_string(),

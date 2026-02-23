@@ -58,6 +58,7 @@ pub fn rule() -> Rule {
         checker: Box::new(|content: &str, file_path: &str| {
             let test_ranges = test_context_ranges(content);
             non_comment_lines(content)
+                .into_iter()
                 .filter(|(_, line)| RE_TODO_MACRO.is_match(line))
                 .filter(|(line_num, _)| {
                     !test_ranges

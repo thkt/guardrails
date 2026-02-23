@@ -11,6 +11,7 @@ pub fn rule() -> Rule {
         file_pattern: RE_RS_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
             let unwrap_lines: Vec<(u32, &str)> = non_comment_lines(content)
+                .into_iter()
                 .filter(|(_, line)| RE_UNWRAP.is_match(line))
                 .collect();
             if unwrap_lines.len() >= THRESHOLD {

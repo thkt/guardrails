@@ -65,35 +65,64 @@ pub static RE_RS_FILE: Lazy<Regex> =
 pub static RE_ALL_FILES: Lazy<Regex> =
     Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
 
-/// Matches comment-start markers, not inline comments.
+/// Matches single-line comment markers.
 /// For JSDoc block comments, only matches `* ` (with space) or bare `*` lines
 /// to avoid false positives on multiplication like `x * y`.
 #[inline]
-fn starts_with_comment(line: &str) -> bool {
+fn is_line_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with("//")
-        || trimmed.starts_with("/*")
-        || trimmed.starts_with("* ")
-        || trimmed == "*"
+    trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"
 }
 
-#[inline]
-pub(crate) fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
-    content
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| !starts_with_comment(line))
-        .map(|(idx, line)| ((idx + 1) as u32, line))
+/// Returns an iterator over (1-based line number, line) pairs, skipping
+/// comment lines. Tracks `/* ... */` block comment state across lines.
+pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
+    let mut result = Vec::new();
+    let mut in_block = false;
+    for (idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if in_block {
+            if let Some(pos) = trimmed.find("*/") {
+                in_block = false;
+                let after = trimmed[pos + 2..].trim();
+                if !after.is_empty() && !is_line_comment(after) {
+                    result.push(((idx + 1) as u32, line));
+                }
+            }
+            continue;
+        }
+        if let Some(pos) = trimmed.find("/*") {
+            let before = trimmed[..pos].trim();
+            if !trimmed[pos..].contains("*/") {
+                in_block = true;
+                if !before.is_empty() {
+                    result.push(((idx + 1) as u32, line));
+                }
+                continue;
+            }
+            // Inline block comment like `code /* comment */ code`
+            if before.is_empty() && trimmed[pos..].ends_with("*/") {
+                continue;
+            }
+        }
+        if is_line_comment(line) {
+            continue;
+        }
+        result.push(((idx + 1) as u32, line));
+    }
+    result
 }
 
 pub fn find_non_comment_match(content: &str, pattern: &Regex) -> Option<u32> {
     non_comment_lines(content)
+        .into_iter()
         .find(|(_, line)| pattern.is_match(line))
         .map(|(line_num, _)| line_num)
 }
 
 pub fn count_non_comment_matches(content: &str, pattern: &Regex) -> usize {
     non_comment_lines(content)
+        .into_iter()
         .filter(|(_, line)| pattern.is_match(line))
         .count()
 }
@@ -175,4 +204,98 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         open_redirect     => open_redirect,
     );
     rules
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_comments_filtered() {
+        let content = "code\n// comment\nmore code";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "code"), (3, "more code")]);
+    }
+
+    #[test]
+    fn jsdoc_star_lines_filtered() {
+        let content = "code\n * jsdoc line\n *\nmore";
+        let lines: Vec<_> = non_comment_lines(content);
+        // `* ` and bare `*` are filtered as line comments
+        assert_eq!(lines, vec![(1, "code"), (4, "more")]);
+    }
+
+    #[test]
+    fn block_comment_single_line() {
+        let content = "code\n/* inline comment */\nmore";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "code"), (3, "more")]);
+    }
+
+    #[test]
+    fn block_comment_multi_line() {
+        let content = "code\n/*\n  block body without star prefix\n  another body line\n*/\nmore";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "code"), (6, "more")]);
+    }
+
+    #[test]
+    fn block_comment_body_without_star_prefix() {
+        // This was the INT-001 bug: body lines without `* ` prefix leaked through
+        let content =
+            "let x = 1;\n/*\nThis line has no star prefix\nNeither does this one\n*/\nlet y = 2;";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "let x = 1;"), (6, "let y = 2;")]);
+    }
+
+    #[test]
+    fn block_comment_with_code_before_open() {
+        let content = "let x = 1; /*\ncomment body\n*/\nlet y = 2;";
+        let lines: Vec<_> = non_comment_lines(content);
+        // Line 1 has code before /*, so it's included
+        assert_eq!(lines, vec![(1, "let x = 1; /*"), (4, "let y = 2;")]);
+    }
+
+    #[test]
+    fn block_comment_with_code_after_close() {
+        let content = "/*\ncomment\n*/ let x = 1;\nlet y = 2;";
+        let lines: Vec<_> = non_comment_lines(content);
+        // Line 3 has code after */, so it's included
+        assert_eq!(lines, vec![(3, "*/ let x = 1;"), (4, "let y = 2;")]);
+    }
+
+    #[test]
+    fn nested_style_block_comments() {
+        // Rust doesn't nest block comments in this parser, matches first */
+        let content = "code\n/* outer\n/* inner */\nmore";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "code"), (4, "more")]);
+    }
+
+    #[test]
+    fn empty_content() {
+        let lines: Vec<_> = non_comment_lines("");
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn no_comments() {
+        let content = "let x = 1;\nlet y = 2;";
+        let lines: Vec<_> = non_comment_lines(content);
+        assert_eq!(lines, vec![(1, "let x = 1;"), (2, "let y = 2;")]);
+    }
+
+    #[test]
+    fn find_non_comment_match_skips_block_comments() {
+        let re = Regex::new(r"TODO").unwrap();
+        let content = "/*\nTODO: fix this\n*/\nlet x = 1;";
+        assert_eq!(find_non_comment_match(content, &re), None);
+    }
+
+    #[test]
+    fn count_non_comment_matches_skips_block_comments() {
+        let re = Regex::new(r"unsafe").unwrap();
+        let content = "/*\nunsafe block\nunsafe fn\n*/\nunsafe { real }";
+        assert_eq!(count_non_comment_matches(content, &re), 1);
+    }
 }
