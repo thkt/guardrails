@@ -2,11 +2,9 @@ use super::{non_comment_lines, Rule, Severity, Violation, RE_JS_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-// Match http:// URLs (not https://)
 static RE_HTTP_URL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"["']http://[^"']+["']"#).expect("RE_HTTP_URL: invalid regex"));
 
-// Exclude localhost and 127.0.0.1
 static RE_LOCAL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"http://(localhost|127\.0\.0\.1)").expect("RE_LOCAL: invalid regex"));
 
@@ -27,7 +25,7 @@ pub fn rule() -> Rule {
                             file: file_path.to_string(),
                             line: Some(line_num),
                         });
-                        break; // one violation per line is sufficient
+                        break;
                     }
                 }
             }
@@ -49,7 +47,6 @@ mod tests {
         r.check(content, path)
     }
 
-    // T-015: fetch("http://api.example.com") → 1 violation, Medium
     #[test]
     fn detects_http_fetch() {
         let v = check(r#"fetch("http://api.example.com/data");"#, "/src/api.ts");
@@ -57,7 +54,6 @@ mod tests {
         assert_eq!(v[0].severity, Severity::Medium);
     }
 
-    // T-016: axios.get("http://cdn.example.com") → 1 violation
     #[test]
     fn detects_http_axios() {
         let v = check(
@@ -67,25 +63,21 @@ mod tests {
         assert_eq!(v.len(), 1);
     }
 
-    // T-017: fetch("http://localhost:3000") → 0 violations (localhost)
     #[test]
     fn allows_localhost() {
         assert!(check(r#"fetch("http://localhost:3000/api");"#, "/src/api.ts").is_empty());
     }
 
-    // T-018: fetch("http://127.0.0.1:8080") → 0 violations (loopback)
     #[test]
     fn allows_loopback() {
         assert!(check(r#"fetch("http://127.0.0.1:8080/api");"#, "/src/api.ts").is_empty());
     }
 
-    // T-019: fetch("https://api.example.com") → 0 violations (HTTPS)
     #[test]
     fn allows_https() {
         assert!(check(r#"fetch("https://api.example.com/data");"#, "/src/api.ts").is_empty());
     }
 
-    // T-020: // fetch("http://x.com") (comment) → 0 violations
     #[test]
     fn ignores_comment() {
         assert!(check(r#"// fetch("http://x.com/api");"#, "/src/api.ts").is_empty());

@@ -44,7 +44,6 @@ fn test_context_ranges(content: &str) -> Vec<(u32, u32)> {
         }
     }
 
-    // If still in test context at end of file, close the range
     if in_test {
         let line_count = content.lines().count() as u32;
         ranges.push((test_start, line_count));

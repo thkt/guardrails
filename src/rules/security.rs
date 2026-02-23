@@ -7,7 +7,6 @@ static RE_HTML_FILE: Lazy<Regex> =
 
 static RE_DOC_WRITE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"document\.write\s*\(").expect("RE_DOC_WRITE: invalid regex"));
-// Match innerHTML/outerHTML assignment to non-literal values (exclude string literals)
 static RE_INNER_HTML: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"\.innerHTML\s*=\s*[^"'`\s;]"#).expect("RE_INNER_HTML: invalid regex")
 });
@@ -172,48 +171,30 @@ mod tests {
         }
     }
 
-    // FR-006: innerHTML/outerHTML string literal exclusion
     #[test]
     fn allows_innerhtml_string_literal() {
-        // T-032: el.innerHTML = "<div>static</div>" should NOT be flagged
         let content = r#"el.innerHTML = "<div>static</div>";"#;
-        assert!(
-            check(content, "/src/component.tsx").is_empty(),
-            "String literal innerHTML should not be flagged"
-        );
+        assert!(check(content, "/src/component.tsx").is_empty());
     }
 
     #[test]
     fn detects_innerhtml_variable() {
-        // T-033: el.innerHTML = variable should still be flagged
         let content = "el.innerHTML = variable;";
-        assert!(
-            !check(content, "/src/component.tsx").is_empty(),
-            "Variable innerHTML should be flagged"
-        );
+        assert!(!check(content, "/src/component.tsx").is_empty());
     }
 
     #[test]
     fn allows_outerhtml_string_literal() {
-        // T-034: el.outerHTML = "..." should NOT be flagged
         let content = r#"el.outerHTML = "<span>text</span>";"#;
-        assert!(
-            check(content, "/src/component.tsx").is_empty(),
-            "String literal outerHTML should not be flagged"
-        );
+        assert!(check(content, "/src/component.tsx").is_empty());
     }
 
     #[test]
     fn detects_outerhtml_variable() {
-        // T-035: el.outerHTML = variable should still be flagged
         let content = "el.outerHTML = variable;";
-        assert!(
-            !check(content, "/src/component.tsx").is_empty(),
-            "Variable outerHTML should be flagged"
-        );
+        assert!(!check(content, "/src/component.tsx").is_empty());
     }
 
-    // TC-001: dedicated document.write() detection test
     #[test]
     fn detects_document_write() {
         let v = check("document.write(userInput);", "/src/render.tsx");
@@ -222,14 +203,10 @@ mod tests {
         assert!(v[0].failure.contains("createElement"));
     }
 
-    // SEC-003: innerHTML bypass via "" + variable (known limitation)
+    // Known limitation: `"" + variable` starts with quote, so regex excludes it
     #[test]
     fn innerhtml_empty_string_concat_not_detected() {
-        // Known limitation: `"" + variable` starts with quote, so regex excludes it
         let content = r#"el.innerHTML = "" + userInput;"#;
-        assert!(
-            check(content, "/src/component.tsx").is_empty(),
-            "Known limitation: empty string concat bypasses detection"
-        );
+        assert!(check(content, "/src/component.tsx").is_empty());
     }
 }
