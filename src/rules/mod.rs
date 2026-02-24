@@ -1,6 +1,5 @@
 mod architecture;
 mod bundle_size;
-mod cargo_lock;
 mod crypto_weak;
 mod dom_access;
 mod eval;
@@ -17,10 +16,7 @@ mod sensitive_logging;
 mod sync_io;
 mod test_assertion;
 mod test_location;
-mod todo_macro;
 mod transaction;
-mod unsafe_usage;
-mod unwrap_usage;
 
 use crate::config::Config;
 use once_cell::sync::Lazy;
@@ -42,10 +38,6 @@ pub(crate) mod rule_id {
     pub const TEST_ASSERTION: &str = "test-assertion";
     pub const FLAKY_TEST: &str = "flaky-test";
     pub const SENSITIVE_LOGGING: &str = "sensitive-logging";
-    pub const UNSAFE_USAGE: &str = "unsafe-usage";
-    pub const UNWRAP_USAGE: &str = "unwrap-usage";
-    pub const TODO_MACRO: &str = "todo-macro";
-    pub const CARGO_LOCK: &str = "cargo-lock";
     pub const EVAL: &str = "eval";
     pub const HARDCODED_SECRET: &str = "hardcoded-secret";
     pub const HTTP_RESOURCE: &str = "http-resource";
@@ -58,9 +50,6 @@ pub static RE_JS_FILE: Lazy<Regex> =
 
 pub static RE_TEST_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
-
-pub static RE_RS_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.rs$").expect("RE_RS_FILE: invalid regex"));
 
 pub static RE_ALL_FILES: Lazy<Regex> =
     Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
@@ -114,61 +103,6 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
         result.push(((idx + 1) as u32, line));
     }
     result
-}
-
-/// Computes test-context line ranges by tracking `#[test]`, `#[cfg(test)]`, and `mod tests`.
-///
-/// Known limitation: brace counting is naive and does not account for braces inside
-/// string literals or comments. This may cause incorrect range boundaries in rare cases.
-pub(crate) fn test_context_ranges(content: &str) -> Vec<(u32, u32)> {
-    let mut ranges = Vec::new();
-    let mut in_test = false;
-    let mut brace_depth: i32 = 0;
-    let mut test_start = 0u32;
-
-    for (idx, line) in content.lines().enumerate() {
-        let line_num = (idx + 1) as u32;
-        let trimmed = line.trim();
-
-        if !in_test
-            && (trimmed.starts_with("#[test]")
-                || trimmed.starts_with("#[cfg(test)]")
-                || trimmed.contains("mod tests"))
-        {
-            in_test = true;
-            test_start = line_num;
-            brace_depth = 0;
-        }
-
-        if in_test {
-            for ch in trimmed.chars() {
-                if ch == '{' {
-                    brace_depth += 1;
-                } else if ch == '}' {
-                    brace_depth -= 1;
-                    if brace_depth <= 0 {
-                        ranges.push((test_start, line_num));
-                        in_test = false;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if in_test {
-        let line_count = content.lines().count() as u32;
-        ranges.push((test_start, line_count));
-    }
-
-    ranges
-}
-
-#[inline]
-fn is_in_test_context(line_num: u32, test_ranges: &[(u32, u32)]) -> bool {
-    test_ranges
-        .iter()
-        .any(|(start, end)| line_num >= *start && line_num <= *end)
 }
 
 pub fn find_non_comment_match(content: &str, pattern: &Regex) -> Option<u32> {
@@ -251,10 +185,6 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         test_assertion    => test_assertion,
         flaky_test        => flaky_test,
         sensitive_logging => sensitive_logging,
-        unsafe_usage      => unsafe_usage,
-        unwrap_usage      => unwrap_usage,
-        todo_macro        => todo_macro,
-        cargo_lock        => cargo_lock,
         eval              => eval,
         hardcoded_secrets => hardcoded_secrets,
         http_resource     => http_resource,
@@ -314,7 +244,7 @@ mod tests {
 
     #[test]
     fn nested_style_block_comments() {
-        // Rust doesn't nest block comments in this parser, matches first */
+        // Nested block comments are not supported; matches first */
         let content = "code\n/* outer\n/* inner */\nmore";
         let lines: Vec<_> = non_comment_lines(content);
         assert_eq!(lines, vec![(1, "code"), (4, "more")]);

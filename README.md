@@ -8,7 +8,7 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 
 - **oxlint integration** (priority): Lint rules from [oxc.rs](https://oxc.rs) with ESLint plugin compatibility
 - **biome integration** (fallback): 300+ lint rules from [biomejs.dev](https://biomejs.dev)
-- **Custom rules**: Security patterns external linters don't cover (JS/TS + Rust)
+- **Custom rules**: Security patterns external linters don't cover (JS/TS)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
 
 ## Installation
@@ -85,7 +85,7 @@ Project config files (`oxlintrc.json`, `biome.json`) are automatically used when
 
 See `src/rules/` for custom rules that complement external linters.
 
-### JS/TS Rules
+### Rules
 
 | Rule               | Severity | Description                                     | When to disable                                  |
 | ------------------ | -------- | ----------------------------------------------- | ------------------------------------------------ |
@@ -108,15 +108,6 @@ See `src/rules/` for custom rules that complement external linters.
 | `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits         | No code generation in project                    |
 | `testLocation`     | Medium   | Test files in src/ directory                    | Co-located test strategy (tests next to source)  |
 | `naming`           | Mixed    | Naming conventions (hooks, components, types)   | Different naming conventions in team/project     |
-
-### Rust Rules
-
-| Rule          | Severity | Description                                        | When to disable                        |
-| ------------- | -------- | -------------------------------------------------- | -------------------------------------- |
-| `unsafeUsage` | Medium   | unsafe blocks/fn/impl (excludes test code)         | FFI-heavy crates, low-level libraries  |
-| `unwrapUsage` | Medium   | Excessive .unwrap() (>=3 per file, excludes tests) | CLI tools, prototypes                  |
-| `todoMacro`   | Medium   | todo!()/unimplemented!() in production code        | Early prototyping                      |
-| `cargoLock`   | Medium   | Cargo.lock in library crates                       | Binary crates (Cargo.lock is expected) |
 
 ## Exit Codes
 
@@ -147,24 +138,20 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
     "sensitiveLogging": true,
     "security": true,
     "architecture": true,
+    "eval": true,
+    "hardcodedSecrets": true,
+    "openRedirect": true,
+    "rawHtml": true,
+    "httpResource": true,
     "transaction": true,
     "domAccess": true,
     "syncIo": true,
     "bundleSize": true,
     "testAssertion": true,
-    "flakyTest": true,
     "generatedFile": true,
     "testLocation": true,
     "naming": true,
-    "unsafeUsage": true,
-    "unwrapUsage": true,
-    "todoMacro": true,
-    "cargoLock": true,
-    "eval": true,
-    "hardcodedSecrets": true,
-    "httpResource": true,
-    "rawHtml": true,
-    "openRedirect": true
+    "flakyTest": true
   },
   "severity": {
     "blockOn": ["critical", "high"]
