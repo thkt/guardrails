@@ -51,16 +51,16 @@ cd .. && rm -rf claude-guardrails
 
 ```json
 "PreToolUse" : [
+  {
+    "hooks": [
       {
-        "hooks": [
-          {
-            "command": "guardrails",
-            "timeout": 1000,
-            "type": "command"
-          }
-        ],
-        "matcher": "Write|Edit|MultiEdit"
+        "command": "guardrails",
+        "timeout": 1000,
+        "type": "command"
       }
+    ],
+    "matcher": "Write|Edit|MultiEdit"
+  }
 ]
 ```
 

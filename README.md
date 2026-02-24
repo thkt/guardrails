@@ -50,16 +50,18 @@ cd .. && rm -rf claude-guardrails
 Add to `~/.claude/settings.json`:
 
 ```json
-{
-  "hooks": [
-    {
-      "command": "guardrails",
-      "timeout": 1000,
-      "type": "command"
-    }
-  ],
-  "matcher": "Write|Edit|MultiEdit"
-}
+"PreToolUse" : [
+  {
+    "hooks": [
+      {
+        "command": "guardrails",
+        "timeout": 1000,
+        "type": "command"
+      }
+    ],
+    "matcher": "Write|Edit|MultiEdit"
+  }
+]
 ```
 
 ## Requirements
