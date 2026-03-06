@@ -1,11 +1,11 @@
-# Architecture - claude-guardrails
+# Architecture - guardrails
 
 > Updated: 2026-02-23T09:41:36Z | Type: rust | Frameworks: N/A
 
 ## Structure
 
 ```text
-/Users/thkt/GitHub/claude-guardrails/src
+/Users/thkt/GitHub/guardrails/src
 ├── biome.rs
 ├── config.rs
 ├── main.rs
@@ -43,8 +43,6 @@
 ```
 
 ## Entry Points
-
-
 
 ## Key Exports
 

@@ -1,6 +1,6 @@
 **English** | [日本語](README.ja.md)
 
-# claude-guardrails
+# guardrails
 
 Code quality checker for Claude Code's PreToolCall hook. Combines external linters with custom rules to validate code and provide actionable fix suggestions.
 
@@ -21,11 +21,11 @@ brew install thkt/tap/guardrails
 
 ### From Release
 
-Download the latest binary from [Releases](https://github.com/thkt/claude-guardrails/releases):
+Download the latest binary from [Releases](https://github.com/thkt/guardrails/releases):
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/thkt/claude-guardrails/releases/latest/download/guardrails-aarch64-apple-darwin -o guardrails
+curl -L https://github.com/thkt/guardrails/releases/latest/download/guardrails-aarch64-apple-darwin -o guardrails
 chmod +x guardrails
 mv guardrails ~/.local/bin/
 ```
@@ -36,11 +36,11 @@ mv guardrails ~/.local/bin/
 
 ```bash
 cd /tmp
-git clone https://github.com/thkt/claude-guardrails.git
-cd claude-guardrails
+git clone https://github.com/thkt/guardrails.git
+cd guardrails
 cargo build --release
 cp target/release/guardrails ~/.local/bin/
-cd .. && rm -rf claude-guardrails
+cd .. && rm -rf guardrails
 ```
 
 ## Usage
@@ -51,8 +51,8 @@ Add to `~/.claude/settings.json`:
 
 ```json
 {
-  "hooks" : {
-    "PreToolUse" : [
+  "hooks": {
+    "PreToolUse": [
       {
         "hooks": [
           {
@@ -124,7 +124,9 @@ See `src/rules/` for custom rules that complement external linters.
 
 ## Configuration
 
-Place `.claude-guardrails.json` at your project root (next to `.git/`). All fields are optional — only specify what you want to override.
+Add a `guardrails` key to `.claude/tools.json` at your project root. All fields are optional — only specify what you want to override.
+
+> **Migration**: `.claude-guardrails.json` at the project root is still supported as a legacy fallback. If both exist, `.claude/tools.json` takes priority.
 
 **Defaults** (no config file needed):
 
@@ -135,32 +137,34 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "enabled": true,
-  "rules": {
-    "oxlint": true,
-    "biome": true,
-    "sensitiveFile": true,
-    "cryptoWeak": true,
-    "sensitiveLogging": true,
-    "security": true,
-    "architecture": true,
-    "eval": true,
-    "hardcodedSecrets": true,
-    "openRedirect": true,
-    "rawHtml": true,
-    "httpResource": true,
-    "transaction": true,
-    "domAccess": true,
-    "syncIo": true,
-    "bundleSize": true,
-    "testAssertion": true,
-    "generatedFile": true,
-    "testLocation": true,
-    "naming": true,
-    "flakyTest": true
-  },
-  "severity": {
-    "blockOn": ["critical", "high"]
+  "guardrails": {
+    "enabled": true,
+    "rules": {
+      "oxlint": true,
+      "biome": true,
+      "sensitiveFile": true,
+      "cryptoWeak": true,
+      "sensitiveLogging": true,
+      "security": true,
+      "architecture": true,
+      "eval": true,
+      "hardcodedSecrets": true,
+      "openRedirect": true,
+      "rawHtml": true,
+      "httpResource": true,
+      "transaction": true,
+      "domAccess": true,
+      "syncIo": true,
+      "bundleSize": true,
+      "testAssertion": true,
+      "generatedFile": true,
+      "testLocation": true,
+      "naming": true,
+      "flakyTest": true
+    },
+    "severity": {
+      "blockOn": ["critical", "high"]
+    }
   }
 }
 ```
@@ -171,8 +175,10 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "rules": {
-    "oxlint": true
+  "guardrails": {
+    "rules": {
+      "oxlint": true
+    }
   }
 }
 ```
@@ -181,9 +187,11 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "rules": {
-    "oxlint": false,
-    "biome": false
+  "guardrails": {
+    "rules": {
+      "oxlint": false,
+      "biome": false
+    }
   }
 }
 ```
@@ -192,9 +200,11 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "rules": {
-    "domAccess": false,
-    "bundleSize": false
+  "guardrails": {
+    "rules": {
+      "domAccess": false,
+      "bundleSize": false
+    }
   }
 }
 ```
@@ -203,8 +213,10 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "severity": {
-    "blockOn": ["critical", "high", "medium", "low"]
+  "guardrails": {
+    "severity": {
+      "blockOn": ["critical", "high", "medium", "low"]
+    }
   }
 }
 ```
@@ -213,20 +225,24 @@ Place `.claude-guardrails.json` at your project root (next to `.git/`). All fiel
 
 ```json
 {
-  "enabled": false
+  "guardrails": {
+    "enabled": false
+  }
 }
 ```
 
 ### Config Resolution
 
-The config file is found by walking up from the target file to the nearest `.git` directory. If `.claude-guardrails.json` exists there, it is loaded and merged with defaults.
+The config file is found by walking up from the target file to the nearest `.git` directory.
 
 ```text
-project-root/          ← .git/ + .claude-guardrails.json here
+project-root/
+├── .claude/
+│   └── tools.json     ← preferred (guardrails key)
+├── .git/
 ├── src/
 │   └── app.ts         ← file being checked → walks up to find config
-├── .git/
-└── .claude-guardrails.json
+└── .claude-guardrails.json  ← legacy fallback
 ```
 
 ## Using with Existing Linters
@@ -242,9 +258,11 @@ To disable external linters in guardrails and rely on your commit hook instead:
 
 ```json
 {
-  "rules": {
-    "oxlint": false,
-    "biome": false
+  "guardrails": {
+    "rules": {
+      "oxlint": false,
+      "biome": false
+    }
   }
 }
 ```
