@@ -1,7 +1,10 @@
 project_name: "guardrails"
-updated: "2026-02-23T09:41:36Z"
+updated: "2026-03-06T12:10:28Z"
 source: hook
 project_type: "rust"
-frameworks: []
-entry_points: []
-key_exports: []
+frameworks:
+  []
+entry_points:
+  []
+key_exports:
+  []

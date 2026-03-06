@@ -1,6 +1,6 @@
 # Architecture - guardrails
 
-> Updated: 2026-02-23T09:41:36Z | Type: rust | Frameworks: N/A
+> Updated: 2026-03-06T12:10:28Z | Type: rust | Frameworks: N/A
 
 ## Structure
 
@@ -15,7 +15,6 @@
 ├── rules
 │   ├── architecture.rs
 │   ├── bundle_size.rs
-│   ├── cargo_lock.rs
 │   ├── crypto_weak.rs
 │   ├── dom_access.rs
 │   ├── eval.rs
@@ -33,16 +32,15 @@
 │   ├── sync_io.rs
 │   ├── test_assertion.rs
 │   ├── test_location.rs
-│   ├── todo_macro.rs
-│   ├── transaction.rs
-│   ├── unsafe_usage.rs
-│   └── unwrap_usage.rs
+│   └── transaction.rs
 └── scanner.rs
 
-2 directories, 31 files
+2 directories, 27 files
 ```
 
 ## Entry Points
+
+
 
 ## Key Exports
 
