@@ -1,0 +1,13 @@
+{
+  "name": "guardrails",
+  "owner": {
+    "name": "thkt"
+  },
+  "plugins": [
+    {
+      "name": "guardrails",
+      "source": "./",
+      "description": "PreToolUse hook - oxlint/biome + custom security rules"
+    }
+  ]
+}

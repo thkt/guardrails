@@ -1,0 +1,7 @@
+{
+  "name": "guardrails",
+  "description": "PreToolUse hook for Claude Code. Combines oxlint/biome with custom security rules to validate code on Write/Edit.",
+  "author": {
+    "name": "thkt"
+  }
+}

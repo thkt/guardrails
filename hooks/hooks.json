@@ -1,0 +1,17 @@
+{
+  "description": "Code quality guard - validates code on Write/Edit/MultiEdit",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/wrapper.sh guardrails",
+            "timeout": 1000
+          }
+        ]
+      }
+    ]
+  }
+}
