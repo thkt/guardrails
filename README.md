@@ -13,7 +13,22 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 
 ## Installation
 
-### Homebrew (Recommended)
+### Claude Code Plugin (Recommended)
+
+Installs the binary and registers the hook automatically:
+
+```bash
+claude plugins marketplace add github:thkt/guardrails
+claude plugins install guardrails
+```
+
+If the binary is not yet installed, run the bundled installer:
+
+```bash
+~/.claude/plugins/cache/guardrails/guardrails/*/hooks/install.sh
+```
+
+### Homebrew
 
 ```bash
 brew install thkt/tap/guardrails
@@ -25,14 +40,11 @@ Download the latest binary from [Releases](https://github.com/thkt/guardrails/re
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/thkt/guardrails/releases/latest/download/guardrails-aarch64-apple-darwin -o guardrails
-chmod +x guardrails
+curl -L https://github.com/thkt/guardrails/releases/latest/download/guardrails-aarch64-apple-darwin.tar.gz | tar xz
 mv guardrails ~/.local/bin/
 ```
 
 ### From Source
-
-> **Note**: Do not clone into your project directory. The cloned repository will remain as a nested git repo and may interfere with your project's git operations.
 
 ```bash
 cd /tmp
@@ -47,7 +59,7 @@ cd .. && rm -rf guardrails
 
 ### As Claude Code Hook
 
-Add to `~/.claude/settings.json`:
+When installed as a plugin, hooks are registered automatically. For manual setup, add to `~/.claude/settings.json`:
 
 ```json
 {
