@@ -298,6 +298,15 @@ These rules use `StringScanner` which tracks comment state across lines:
 
 These trade-offs are acceptable for guardrails use cases where false positives are preferable to false negatives.
 
+## Related Tools
+
+| Tool | Hook | Timing | Role |
+| --- | --- | --- | --- |
+| **guardrails** | PreToolUse | Before Write/Edit | Lint + security checks |
+| [formatter](https://github.com/thkt/formatter) | PostToolUse | After Write/Edit | Auto code formatting |
+| [reviews](https://github.com/thkt/reviews) | PreToolUse | Review Skill execution | Static analysis context |
+| [gates](https://github.com/thkt/gates) | Stop | Agent completion | Quality gates (knip, tsgo, madge) |
+
 ## License
 
 MIT
