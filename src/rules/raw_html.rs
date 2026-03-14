@@ -1,21 +1,22 @@
-use super::{non_comment_lines, Rule, Severity, Violation, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_HTML_CONCAT: Lazy<Regex> = Lazy::new(|| {
+static RE_HTML_CONCAT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"['"]<[a-zA-Z][^>]*>['"]\s*\+\s*[a-zA-Z_$]"#)
         .expect("RE_HTML_CONCAT: invalid regex")
 });
 
-static RE_HTML_TEMPLATE: Lazy<Regex> = Lazy::new(|| {
+static RE_HTML_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"`[^`]{0,500}<[a-zA-Z][^>]{0,200}>[^`]{0,500}\$\{[^`]{0,500}`")
         .expect("RE_HTML_TEMPLATE: invalid regex")
 });
 
-static RE_HTML_JOIN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"['"]<[a-zA-Z][^>]*>['"]"#).expect("RE_HTML_JOIN: invalid regex"));
-static RE_JOIN_CALL: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.join\s*\(").expect("RE_JOIN_CALL: invalid regex"));
+static RE_HTML_JOIN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"['"]<[a-zA-Z][^>]*>['"]"#).expect("RE_HTML_JOIN: invalid regex")
+});
+static RE_JOIN_CALL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.join\s*\(").expect("RE_JOIN_CALL: invalid regex"));
 
 const JOIN_PROXIMITY_LINES: u32 = 5;
 
@@ -23,7 +24,7 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
     Violation {
         rule: super::rule_id::RAW_HTML.to_string(),
         severity: Severity::High,
-        failure: "Use DOM APIs or framework templating instead of HTML string concatenation."
+        fix: "Use DOM APIs or framework templating instead of HTML string concatenation."
             .to_string(),
         file: file_path.to_string(),
         line: Some(line_num),
@@ -33,11 +34,11 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
             let mut html_tag_line: Option<u32> = None;
 
-            for (line_num, line) in non_comment_lines(content) {
+            for &(line_num, line) in lines {
                 if RE_HTML_CONCAT.is_match(line) {
                     violations.push(make_violation(file_path, line_num));
                     continue;
@@ -77,7 +78,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path)
+        r.check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]

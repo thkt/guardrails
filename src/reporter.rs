@@ -5,6 +5,9 @@ fn format_rule_name(rule: &str) -> (String, &'static str) {
         let short = rule.strip_prefix("biome/lint/").unwrap_or(rule);
         let name = short.rsplit('/').next().unwrap_or(short);
         (name.to_string(), "biome")
+    } else if rule.starts_with("oxlint/") {
+        let name = rule.strip_prefix("oxlint/").unwrap_or(rule);
+        (name.to_string(), "oxlint")
     } else {
         (rule.to_string(), "guardrails")
     }
@@ -30,9 +33,15 @@ pub fn format_violations(violations: &[&Violation]) -> String {
             None => v.file.clone(),
         };
 
-        lines.push(format!("[{}] {} ({})", i + 1, rule_name, source));
+        lines.push(format!(
+            "[{}] {} ({}) [{}]",
+            i + 1,
+            rule_name,
+            source,
+            v.severity
+        ));
         lines.push(format!("    location: {}", location));
-        lines.push(format!("    fix: {}", v.failure));
+        lines.push(format!("    fix: {}", v.fix));
         lines.push(String::new());
     }
 
@@ -54,10 +63,69 @@ pub fn format_warnings(violations: &[&Violation]) -> String {
             Some(l) => format!("{}:{}", v.file, l),
             None => v.file.clone(),
         };
-        lines.push(format!("  - {} ({}) at {}", rule_name, source, location));
+        lines.push(format!(
+            "  - {} ({}) [{}] at {}",
+            rule_name, source, v.severity, location
+        ));
+        lines.push(format!("    fix: {}", v.fix));
     }
 
     lines.push(String::new());
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::Severity;
+
+    #[test]
+    fn format_rule_name_biome() {
+        let (name, source) = format_rule_name("biome/lint/suspicious/noExplicitAny");
+        assert_eq!(name, "noExplicitAny");
+        assert_eq!(source, "biome");
+    }
+
+    #[test]
+    fn format_rule_name_oxlint() {
+        let (name, source) = format_rule_name("oxlint/eslint(no-debugger)");
+        assert_eq!(name, "eslint(no-debugger)");
+        assert_eq!(source, "oxlint");
+    }
+
+    #[test]
+    fn format_rule_name_guardrails() {
+        let (name, source) = format_rule_name("security");
+        assert_eq!(name, "security");
+        assert_eq!(source, "guardrails");
+    }
+
+    #[test]
+    fn format_violations_output() {
+        let v = Violation {
+            rule: "oxlint/eslint(no-debugger)".to_string(),
+            severity: Severity::High,
+            fix: "Remove debugger".to_string(),
+            file: "/src/app.ts".to_string(),
+            line: Some(5),
+        };
+        let output = format_violations(&[&v]);
+        assert!(output.contains("eslint(no-debugger) (oxlint) [HIGH]"));
+        assert!(output.contains("/src/app.ts:5"));
+    }
+
+    #[test]
+    fn format_warnings_output() {
+        let v = Violation {
+            rule: "biome/lint/style/useConst".to_string(),
+            severity: Severity::Low,
+            fix: "Use const".to_string(),
+            file: "/src/app.ts".to_string(),
+            line: Some(10),
+        };
+        let output = format_warnings(&[&v]);
+        assert!(output.contains("useConst (biome) [LOW]"));
+        assert!(output.contains("fix: Use const"));
+    }
 }

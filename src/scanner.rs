@@ -1,32 +1,21 @@
-//! Shared JavaScript/TypeScript string and comment scanner.
-//!
-//! Provides unified parsing for:
-//! - String literals (single, double, template)
-//! - Comments (line `//` and block `/* */`)
-//! - Template interpolations `${...}`
+//! JS/TS string and comment scanner.
 //!
 //! # Limitations
 //!
-//! **Regex literals are not supported.** A forward slash `/` triggers comment
-//! detection when followed by `/` or `*`. This affects patterns like:
-//! - `const pattern = /\d+/g;` — misidentified as line comment
-//! - Division followed by `/` or `*` may trigger false detection
-//!
-//! Fully disambiguating regex from division requires context-aware parsing
-//! beyond the scope of this scanner.
-//!
-//! Note: Tracks ASCII delimiters only. UTF-8 content is handled correctly
-//! since multi-byte sequences never contain ASCII delimiter bytes.
+//! **Regex literals are not supported.** `/` triggers comment detection when
+//! followed by `/` or `*` (e.g., `/\d+/g` is misidentified as line comment).
+//! Disambiguating regex from division requires context-aware parsing beyond
+//! this scanner's scope.
 
 pub struct StringScanner<'a> {
     bytes: &'a [u8],
-    pub pos: usize,
-    pub in_single_quote: bool,
-    pub in_double_quote: bool,
-    pub in_template: bool,
-    pub in_block_comment: bool,
-    pub in_line_comment: bool,
-    pub template_interp_depth: Vec<i32>,
+    pub(crate) pos: usize,
+    pub(crate) in_single_quote: bool,
+    pub(crate) in_double_quote: bool,
+    pub(crate) in_template: bool,
+    pub(crate) in_block_comment: bool,
+    pub(crate) in_line_comment: bool,
+    pub(crate) template_interp_depth: Vec<i32>,
 }
 
 impl<'a> StringScanner<'a> {
@@ -43,7 +32,6 @@ impl<'a> StringScanner<'a> {
         }
     }
 
-    /// Returns true if currently inside a string literal or comment.
     /// Template interpolation (`${...}`) returns false because it contains executable code.
     pub fn in_string_or_comment(&self) -> bool {
         self.in_single_quote
@@ -53,8 +41,7 @@ impl<'a> StringScanner<'a> {
             || self.in_line_comment
     }
 
-    /// Returns true when bracket matching should be skipped.
-    /// Includes strings, comments, and interpolation-closing braces (depth 1 + `}`).
+    /// Also skips interpolation-closing braces (depth 1 + `}`).
     pub fn skip_for_bracket_matching(&self) -> bool {
         if self.in_string_or_comment() {
             return true;
@@ -200,16 +187,43 @@ impl<'a> StringScanner<'a> {
     }
 }
 
+pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u8) -> Option<&str> {
+    let bytes = content.as_bytes();
+    let mut scanner = StringScanner::new(bytes, start);
+    let mut depth = 1;
+
+    while scanner.pos < bytes.len() && depth > 0 {
+        let skip = scanner.skip_for_bracket_matching();
+        let byte = scanner.current();
+        scanner.advance();
+
+        if !skip {
+            match byte {
+                Some(b) if b == open => depth += 1,
+                Some(b) if b == close => depth -= 1,
+                _ => {}
+            }
+        }
+    }
+
+    if depth == 0 {
+        Some(&content[start..scanner.pos - 1])
+    } else {
+        None
+    }
+}
+
 /// Pre-compute line offsets for O(log n) line number lookup.
 pub fn build_line_offsets(content: &str) -> Vec<usize> {
     content
-        .char_indices()
-        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+        .as_bytes()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &b)| if b == b'\n' { Some(i) } else { None })
         .collect()
 }
 
-/// Convert byte offset to 1-based line number using binary search.
-/// Offsets pointing to newline characters belong to the line ending at that position.
+/// Offsets on newline characters belong to the line ending at that position.
 pub fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
     match offsets.binary_search(&offset) {
         Ok(idx) | Err(idx) => idx + 1,
@@ -294,5 +308,45 @@ mod tests {
         scanner.advance(); // '
         scanner.advance(); // \ (should not panic)
         assert!(scanner.pos <= content.len());
+    }
+
+    #[test]
+    fn extract_delimited_balanced_braces() {
+        let content = "{ a + b }";
+        assert_eq!(
+            extract_delimited_content(content, 1, b'{', b'}'),
+            Some(" a + b ")
+        );
+    }
+
+    #[test]
+    fn extract_delimited_nested() {
+        let content = "{ if (x) { y } }";
+        assert_eq!(
+            extract_delimited_content(content, 1, b'{', b'}'),
+            Some(" if (x) { y } ")
+        );
+    }
+
+    #[test]
+    fn extract_delimited_unmatched_returns_none() {
+        let content = "{ unclosed";
+        assert_eq!(extract_delimited_content(content, 1, b'{', b'}'), None);
+    }
+
+    #[test]
+    fn extract_delimited_parens() {
+        let content = "(a, b, c)";
+        assert_eq!(
+            extract_delimited_content(content, 1, b'(', b')'),
+            Some("a, b, c")
+        );
+    }
+
+    #[test]
+    fn extract_delimited_skips_string_braces() {
+        let content = r#"{ "}" + x }"#;
+        let result = extract_delimited_content(content, 1, b'{', b'}');
+        assert_eq!(result, Some(r#" "}" + x "#));
     }
 }

@@ -1,37 +1,37 @@
-use super::{find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_EXCLUDED_FILE: Lazy<Regex> = Lazy::new(|| {
+static RE_EXCLUDED_FILE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(\.config\.[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)")
         .expect("RE_EXCLUDED_FILE: invalid regex")
 });
 
 struct SyncIo {
-    pattern: &'static Lazy<Regex>,
+    pattern: &'static LazyLock<Regex>,
     method: &'static str,
     async_alternative: &'static str,
 }
 
-static RE_READ_FILE_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"readFileSync\s*\(").expect("RE_READ_FILE_SYNC: invalid regex"));
+static RE_READ_FILE_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"readFileSync\s*\(").expect("RE_READ_FILE_SYNC: invalid regex"));
 
-static RE_WRITE_FILE_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"writeFileSync\s*\(").expect("RE_WRITE_FILE_SYNC: invalid regex"));
+static RE_WRITE_FILE_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"writeFileSync\s*\(").expect("RE_WRITE_FILE_SYNC: invalid regex"));
 
-static RE_EXISTS_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"existsSync\s*\(").expect("RE_EXISTS_SYNC: invalid regex"));
+static RE_EXISTS_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"existsSync\s*\(").expect("RE_EXISTS_SYNC: invalid regex"));
 
-static RE_MKDIR_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"mkdirSync\s*\(").expect("RE_MKDIR_SYNC: invalid regex"));
+static RE_MKDIR_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"mkdirSync\s*\(").expect("RE_MKDIR_SYNC: invalid regex"));
 
-static RE_RMDIR_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"rm(dir)?Sync\s*\(").expect("RE_RMDIR_SYNC: invalid regex"));
+static RE_RMDIR_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"rm(dir)?Sync\s*\(").expect("RE_RMDIR_SYNC: invalid regex"));
 
-static RE_STAT_SYNC: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(l)?statSync\s*\(").expect("RE_STAT_SYNC: invalid regex"));
+static RE_STAT_SYNC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(l)?statSync\s*\(").expect("RE_STAT_SYNC: invalid regex"));
 
-static SYNC_IO: Lazy<[SyncIo; 6]> = Lazy::new(|| {
+static SYNC_IO: LazyLock<[SyncIo; 6]> = LazyLock::new(|| {
     [
         SyncIo {
             pattern: &RE_READ_FILE_SYNC,
@@ -69,7 +69,7 @@ static SYNC_IO: Lazy<[SyncIo; 6]> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             // Allow sync I/O in config files and CLI scripts
             if RE_EXCLUDED_FILE.is_match(file_path) {
                 return Vec::new();
@@ -78,11 +78,11 @@ pub fn rule() -> Rule {
             let mut violations = Vec::new();
 
             for io in SYNC_IO.iter() {
-                if let Some(line_num) = find_non_comment_match(content, io.pattern) {
+                if let Some(line_num) = find_match_in_lines(lines, io.pattern) {
                     violations.push(Violation {
                         rule: super::rule_id::SYNC_IO.to_string(),
                         severity: Severity::Medium,
-                        failure: format!(
+                        fix: format!(
                             "{} blocks the event loop. Use {} instead.",
                             io.method, io.async_alternative
                         ),
@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path)
+        rule().check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -110,7 +110,7 @@ mod tests {
         let content = r#"const data = fs.readFileSync('file.txt', 'utf8');"#;
         let violations = check(content, "/src/utils/file.ts");
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("readFileSync"));
+        assert!(violations[0].fix.contains("readFileSync"));
     }
 
     #[test]

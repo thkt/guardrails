@@ -1,7 +1,60 @@
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
-/// Search for a binary in node_modules/.bin/ walking up from file_path,
-/// then fall back to the bare command name (PATH resolution).
+pub fn is_tool_available(name: &str, file_path: &str) -> bool {
+    Command::new(resolve_bin(name, file_path))
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+const LINTER_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub fn run_with_timeout(cmd: &mut Command, tool: &str) -> Option<Output> {
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("guardrails: {}: failed to spawn: {}", tool, e);
+            return None;
+        }
+    };
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| {
+                        eprintln!("guardrails: {}: failed to collect output: {}", tool, e);
+                        e
+                    })
+                    .ok();
+            }
+            Ok(None) => {
+                if start.elapsed() > LINTER_TIMEOUT {
+                    eprintln!(
+                        "guardrails: {}: timed out after {}s, skipping",
+                        tool,
+                        LINTER_TIMEOUT.as_secs()
+                    );
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => {
+                eprintln!("guardrails: {}: process error: {}", tool, e);
+                return None;
+            }
+        }
+    }
+}
+
+/// Falls back to bare command name (PATH resolution) if not found in node_modules.
 pub fn resolve_bin(name: &str, file_path: &str) -> PathBuf {
     let mut dir = Path::new(file_path).parent();
     while let Some(d) = dir {

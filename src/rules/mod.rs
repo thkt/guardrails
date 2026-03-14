@@ -19,9 +19,9 @@ mod test_location;
 mod transaction;
 
 use crate::config::Config;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
+use std::sync::LazyLock;
 
 pub(crate) mod rule_id {
     pub const SENSITIVE_FILE: &str = "sensitive-file";
@@ -45,29 +45,23 @@ pub(crate) mod rule_id {
     pub const OPEN_REDIRECT: &str = "open-redirect";
 }
 
-pub static RE_JS_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
+pub static RE_JS_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
 
-pub static RE_TEST_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
+pub static RE_TEST_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
-pub static RE_ALL_FILES: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
+pub static RE_ALL_FILES: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
 
-/// Matches single-line comment markers.
-/// For JSDoc block comments, only matches `* ` (with space) or bare `*` lines
-/// to avoid false positives on multiplication like `x * y`.
+/// JSDoc: matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
 #[inline]
 fn is_line_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"
 }
 
-/// Returns (1-based line number, line) pairs, skipping comment lines.
-/// Tracks `/* ... */` block comment state across lines.
-///
-/// Known limitation: `/*` and `*/` inside string literals are treated as
-/// comment markers, which may cause incorrect filtering in rare cases.
+/// Known limitation: `/*`/`*/` inside string literals are treated as comment markers.
 pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
     let mut result = Vec::new();
     let mut in_block = false;
@@ -105,16 +99,16 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
     result
 }
 
-pub fn find_non_comment_match(content: &str, pattern: &Regex) -> Option<u32> {
-    non_comment_lines(content)
-        .into_iter()
+pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32> {
+    lines
+        .iter()
         .find(|(_, line)| pattern.is_match(line))
-        .map(|(line_num, _)| line_num)
+        .map(|(line_num, _)| *line_num)
 }
 
-pub fn count_non_comment_matches(content: &str, pattern: &Regex) -> usize {
-    non_comment_lines(content)
-        .into_iter()
+pub fn count_matches_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> usize {
+    lines
+        .iter()
         .filter(|(_, line)| pattern.is_match(line))
         .count()
 }
@@ -126,6 +120,16 @@ pub enum Severity {
     High,
     Medium,
     Low,
+}
+
+impl Severity {
+    pub fn from_linter_str(s: &str) -> Self {
+        match s {
+            "error" => Severity::High,
+            "warning" => Severity::Medium,
+            _ => Severity::Low,
+        }
+    }
 }
 
 impl std::fmt::Display for Severity {
@@ -144,12 +148,12 @@ impl std::fmt::Display for Severity {
 pub struct Violation {
     pub rule: String,
     pub severity: Severity,
-    pub failure: String,
+    pub fix: String,
     pub file: String,
     pub line: Option<u32>,
 }
 
-type Checker = Box<dyn Fn(&str, &str) -> Vec<Violation> + Send + Sync>;
+type Checker = Box<dyn Fn(&str, &str, &[(u32, &str)]) -> Vec<Violation> + Send + Sync>;
 
 pub struct Rule {
     pub file_pattern: Regex,
@@ -157,8 +161,8 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn check(&self, content: &str, file_path: &str) -> Vec<Violation> {
-        (self.checker)(content, file_path)
+    pub fn check(&self, content: &str, file_path: &str, lines: &[(u32, &str)]) -> Vec<Violation> {
+        (self.checker)(content, file_path, lines)
     }
 }
 
@@ -264,16 +268,40 @@ mod tests {
     }
 
     #[test]
-    fn find_non_comment_match_skips_block_comments() {
+    fn find_match_in_lines_skips_block_comments() {
         let re = Regex::new(r"TODO").unwrap();
         let content = "/*\nTODO: fix this\n*/\nlet x = 1;";
-        assert_eq!(find_non_comment_match(content, &re), None);
+        assert_eq!(find_match_in_lines(&non_comment_lines(content), &re), None);
     }
 
     #[test]
-    fn count_non_comment_matches_skips_block_comments() {
+    fn count_matches_in_lines_skips_block_comments() {
         let re = Regex::new(r"unsafe").unwrap();
         let content = "/*\nunsafe block\nunsafe fn\n*/\nunsafe { real }";
-        assert_eq!(count_non_comment_matches(content, &re), 1);
+        assert_eq!(count_matches_in_lines(&non_comment_lines(content), &re), 1);
+    }
+
+    #[test]
+    fn severity_from_linter_str() {
+        assert_eq!(Severity::from_linter_str("error"), Severity::High);
+        assert_eq!(Severity::from_linter_str("warning"), Severity::Medium);
+        assert_eq!(Severity::from_linter_str("info"), Severity::Low);
+        assert_eq!(Severity::from_linter_str("unknown"), Severity::Low);
+    }
+
+    #[test]
+    fn load_rules_default_config_loads_all() {
+        let config = Config::default();
+        let rules = load_rules(&config);
+        assert_eq!(rules.len(), 19);
+    }
+
+    #[test]
+    fn load_rules_respects_disabled_rule() {
+        let mut config = Config::default();
+        config.rules.eval = false;
+        config.rules.security = false;
+        let rules = load_rules(&config);
+        assert_eq!(rules.len(), 17);
     }
 }

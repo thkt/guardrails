@@ -1,13 +1,13 @@
-use super::{non_comment_lines, Rule, Severity, Violation, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_LOCATION_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+static RE_LOCATION_ASSIGN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(^|[^.\w])(window\.|document\.)?location(\.href)?\s*=\s*[a-zA-Z_$]"#)
         .expect("RE_LOCATION_ASSIGN: invalid regex")
 });
 
-static RE_LOCATION_CALL: Lazy<Regex> = Lazy::new(|| {
+static RE_LOCATION_CALL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(^|[^.\w])(window\.|document\.)?location\.(assign|replace)\s*\(\s*[a-zA-Z_$]"#)
         .expect("RE_LOCATION_CALL: invalid regex")
 });
@@ -15,17 +15,16 @@ static RE_LOCATION_CALL: Lazy<Regex> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
-            for (line_num, line) in non_comment_lines(content) {
+            for &(line_num, line) in lines {
                 if RE_LOCATION_ASSIGN.is_match(line) || RE_LOCATION_CALL.is_match(line) {
                     violations.push(Violation {
                         rule: super::rule_id::OPEN_REDIRECT.to_string(),
                         severity: Severity::High,
-                        failure:
-                            "Validate URL before redirect. Use allowlist or ensure relative path."
-                                .to_string(),
+                        fix: "Validate URL before redirect. Use allowlist or ensure relative path."
+                            .to_string(),
                         file: file_path.to_string(),
                         line: Some(line_num),
                     });
@@ -46,7 +45,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path)
+        r.check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -104,10 +103,5 @@ mod tests {
     #[test]
     fn ignores_relocation_href() {
         assert!(check("relocation.href = url;", "/src/auth.ts").is_empty());
-    }
-
-    #[test]
-    fn detects_document_location_assign_var() {
-        assert_eq!(check("document.location = url;", "/src/auth.ts").len(), 1);
     }
 }

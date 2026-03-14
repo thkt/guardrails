@@ -1,36 +1,36 @@
-use super::{find_non_comment_match, Rule, Severity, Violation};
-use once_cell::sync::Lazy;
+use super::{find_match_in_lines, Rule, Severity, Violation};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_REACT_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
+static RE_REACT_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
 
 struct DomAccess {
-    pattern: &'static Lazy<Regex>,
+    pattern: &'static LazyLock<Regex>,
     method: &'static str,
 }
 
-static RE_GET_BY_ID: Lazy<Regex> = Lazy::new(|| {
+static RE_GET_BY_ID: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"document\.getElementById\s*\(").expect("RE_GET_BY_ID: invalid regex")
 });
 
-static RE_QUERY_SELECTOR: Lazy<Regex> = Lazy::new(|| {
+static RE_QUERY_SELECTOR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"document\.querySelector(All)?\s*\(").expect("RE_QUERY_SELECTOR: invalid regex")
 });
 
-static RE_GET_ELEMENTS: Lazy<Regex> = Lazy::new(|| {
+static RE_GET_ELEMENTS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"document\.getElementsBy(ClassName|TagName|Name)\s*\(")
         .expect("RE_GET_ELEMENTS: invalid regex")
 });
 
-static RE_CREATE_ELEMENT: Lazy<Regex> = Lazy::new(|| {
+static RE_CREATE_ELEMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"document\.createElement\s*\(").expect("RE_CREATE_ELEMENT: invalid regex")
 });
 
-static RE_APPEND_CHILD: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.appendChild\s*\(").expect("RE_APPEND_CHILD: invalid regex"));
+static RE_APPEND_CHILD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.appendChild\s*\(").expect("RE_APPEND_CHILD: invalid regex"));
 
-static DOM_ACCESS: Lazy<[DomAccess; 5]> = Lazy::new(|| {
+static DOM_ACCESS: LazyLock<[DomAccess; 5]> = LazyLock::new(|| {
     [
         DomAccess {
             pattern: &RE_GET_BY_ID,
@@ -58,15 +58,15 @@ static DOM_ACCESS: Lazy<[DomAccess; 5]> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_REACT_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
             for access in DOM_ACCESS.iter() {
-                if let Some(line_num) = find_non_comment_match(content, access.pattern) {
+                if let Some(line_num) = find_match_in_lines(lines, access.pattern) {
                     violations.push(Violation {
                         rule: super::rule_id::DOM_ACCESS.to_string(),
                         severity: Severity::Medium,
-                        failure: format!(
+                        fix: format!(
                             "Avoid {} in React. Use useRef or React state instead.",
                             access.method
                         ),
@@ -90,7 +90,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path)
+        r.check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -98,7 +98,7 @@ mod tests {
         let content = r#"const el = document.getElementById('root');"#;
         let violations = check(content, "/src/components/App.tsx");
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("getElementById"));
+        assert!(violations[0].fix.contains("getElementById"));
     }
 
     #[test]

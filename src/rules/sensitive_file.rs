@@ -1,8 +1,8 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static SENSITIVE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static SENSITIVE_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"\.env(\.[a-zA-Z]+)?$").expect("env pattern"),
         Regex::new(r"credentials\.[a-zA-Z]+$").expect("credentials pattern"),
@@ -19,12 +19,12 @@ static SENSITIVE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             if SENSITIVE_PATTERNS.iter().any(|p| p.is_match(file_path)) {
                 return vec![Violation {
                     rule: super::rule_id::SENSITIVE_FILE.to_string(),
                     severity: Severity::Critical,
-                    failure: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
+                    fix: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
                     file: file_path.to_string(),
                     line: None,
                 }];
@@ -39,7 +39,7 @@ mod tests {
     use super::*;
 
     fn check(path: &str) -> Vec<Violation> {
-        rule().check("", path)
+        rule().check("", path, &[])
     }
 
     #[test]

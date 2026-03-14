@@ -1,47 +1,48 @@
-use super::{find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
 struct LayerViolation {
-    from_pattern: &'static Lazy<Regex>,
-    importing: &'static Lazy<Regex>,
-    failure: &'static str,
+    from_pattern: &'static LazyLock<Regex>,
+    importing: &'static LazyLock<Regex>,
+    fix: &'static str,
 }
 
-static RE_UTILS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"/utils/").expect("RE_UTILS: invalid regex"));
-static RE_SERVICES: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"/services/").expect("RE_SERVICES: invalid regex"));
-static RE_COMPONENTS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"/components/").expect("RE_COMPONENTS: invalid regex"));
+static RE_UTILS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/utils/").expect("RE_UTILS: invalid regex"));
+static RE_SERVICES: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/services/").expect("RE_SERVICES: invalid regex"));
+static RE_COMPONENTS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/components/").expect("RE_COMPONENTS: invalid regex"));
 
-static RE_IMPORT_UI: Lazy<Regex> = Lazy::new(|| {
+static RE_IMPORT_UI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"from\s+['"].*/(components|hooks|pages|features)/"#)
         .expect("RE_IMPORT_UI: invalid regex")
 });
-static RE_IMPORT_UI_NO_FEATURES: Lazy<Regex> = Lazy::new(|| {
+static RE_IMPORT_UI_NO_FEATURES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"from\s+['"].*/(components|hooks|pages)/"#)
         .expect("RE_IMPORT_UI_NO_FEATURES: invalid regex")
 });
-static RE_IMPORT_PAGES: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"from\s+['"].*\/pages/"#).expect("RE_IMPORT_PAGES: invalid regex"));
+static RE_IMPORT_PAGES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"from\s+['"].*\/pages/"#).expect("RE_IMPORT_PAGES: invalid regex")
+});
 
-static LAYER_VIOLATIONS: Lazy<[LayerViolation; 3]> = Lazy::new(|| {
+static LAYER_VIOLATIONS: LazyLock<[LayerViolation; 3]> = LazyLock::new(|| {
     [
         LayerViolation {
             from_pattern: &RE_UTILS,
             importing: &RE_IMPORT_UI,
-            failure: "Remove import or move function to appropriate layer (utils should not depend on UI)",
+            fix: "Remove import or move function to appropriate layer (utils should not depend on UI)",
         },
         LayerViolation {
             from_pattern: &RE_SERVICES,
             importing: &RE_IMPORT_UI_NO_FEATURES,
-            failure: "Use callback parameters or events instead (services should not depend on UI)",
+            fix: "Use callback parameters or events instead (services should not depend on UI)",
         },
         LayerViolation {
             from_pattern: &RE_COMPONENTS,
             importing: &RE_IMPORT_PAGES,
-            failure: "Pass data via props instead (components should not import pages)",
+            fix: "Pass data via props instead (components should not import pages)",
         },
     ]
 });
@@ -49,18 +50,18 @@ static LAYER_VIOLATIONS: Lazy<[LayerViolation; 3]> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut result = Vec::new();
 
             for v in LAYER_VIOLATIONS.iter() {
                 if !v.from_pattern.is_match(file_path) {
                     continue;
                 }
-                if let Some(line_num) = find_non_comment_match(content, v.importing) {
+                if let Some(line_num) = find_match_in_lines(lines, v.importing) {
                     result.push(Violation {
                         rule: super::rule_id::ARCHITECTURE.to_string(),
                         severity: Severity::High,
-                        failure: v.failure.to_string(),
+                        fix: v.fix.to_string(),
                         file: file_path.to_string(),
                         line: Some(line_num),
                     });
@@ -77,7 +78,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path)
+        rule().check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -85,9 +86,7 @@ mod tests {
         let content = r#"import { Button } from '../components/Button';"#;
         let violations = check(content, "/src/utils/formatter.ts");
         assert_eq!(violations.len(), 1);
-        assert!(violations[0]
-            .failure
-            .contains("utils should not depend on UI"));
+        assert!(violations[0].fix.contains("utils should not depend on UI"));
     }
 
     #[test]
@@ -96,7 +95,7 @@ mod tests {
         let violations = check(content, "/src/services/api.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0]
-            .failure
+            .fix
             .contains("services should not depend on UI"));
     }
 
@@ -106,7 +105,7 @@ mod tests {
         let violations = check(content, "/src/components/Header.tsx");
         assert_eq!(violations.len(), 1);
         assert!(violations[0]
-            .failure
+            .fix
             .contains("components should not import pages"));
     }
 

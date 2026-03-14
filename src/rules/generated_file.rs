@@ -1,8 +1,8 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static GENERATED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static GENERATED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"\.generated\.[a-zA-Z]+$").expect("generated pattern"),
         Regex::new(r"\.g\.(ts|js|dart)$").expect("g pattern"),
@@ -16,13 +16,13 @@ static GENERATED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             for pattern in GENERATED_PATTERNS.iter() {
                 if pattern.is_match(file_path) {
                     return vec![Violation {
                         rule: super::rule_id::GENERATED_FILE.to_string(),
                         severity: Severity::High,
-                        failure: "Do not edit generated files directly. Modify the source and regenerate.".to_string(),
+                        fix: "Do not edit generated files directly. Modify the source and regenerate.".to_string(),
                         file: file_path.to_string(),
                         line: None,
                     }];
@@ -38,7 +38,7 @@ mod tests {
     use super::*;
 
     fn check(path: &str) -> Vec<Violation> {
-        rule().check("", path)
+        rule().check("", path, &[])
     }
 
     #[test]

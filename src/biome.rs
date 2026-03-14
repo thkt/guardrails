@@ -1,11 +1,10 @@
-use crate::resolve::resolve_bin;
+use crate::parse_json::parse_linter_json;
+use crate::resolve::{resolve_bin, run_with_timeout};
 use crate::rules::{Severity, Violation};
 use crate::scanner::{build_line_offsets, offset_to_line};
+use crate::tempfile_util::write_temp;
 use serde::Deserialize;
-use std::io::Write;
-use std::path::Path;
 use std::process::Command;
-use tempfile::Builder;
 
 #[derive(Debug, Deserialize)]
 struct BiomeOutput {
@@ -47,47 +46,15 @@ struct BiomeLocation {
 }
 
 pub fn is_available(file_path: &str) -> bool {
-    Command::new(resolve_bin("biome", file_path))
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::resolve::is_tool_available("biome", file_path)
 }
 
-/// Creates temp file in same directory as file_path to inherit project's biome.json.
+/// Fail-open: returns empty violations on any error.
 pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    let path = Path::new(file_path);
-    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
-
-    let temp_dir = std::env::temp_dir();
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
-        .unwrap_or(&temp_dir);
-
-    let temp_file = match Builder::new()
-        .suffix(&format!(".{}", extension))
-        .tempfile_in(dir)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("guardrails: biome: failed to create temp file: {}", e);
-            return vec![];
-        }
+    let temp_file = match write_temp(content, file_path, "biome") {
+        Some(f) => f,
+        None => return vec![],
     };
-
-    if let Err(e) = temp_file.as_file().write_all(content.as_bytes()) {
-        eprintln!("guardrails: biome: failed to write temp file: {}", e);
-        return vec![];
-    }
-
-    if let Err(e) = temp_file.as_file().flush() {
-        eprintln!(
-            "guardrails: biome: failed to flush temp file before lint: {}",
-            e
-        );
-        return vec![];
-    }
 
     let temp_path_str = match temp_file.path().to_str() {
         Some(s) => s,
@@ -97,65 +64,35 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    let output = match Command::new(resolve_bin("biome", file_path))
-        .args(["lint", "--reporter=json", temp_path_str])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("guardrails: biome: failed to execute: {}", e);
-            return vec![];
-        }
+    let output = match run_with_timeout(
+        Command::new(resolve_bin("biome", file_path)).args([
+            "lint",
+            "--reporter=json",
+            temp_path_str,
+        ]),
+        "biome",
+    ) {
+        Some(o) => o,
+        None => return vec![],
     };
 
-    // biome outputs to stdout even on errors
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Try parsing full stdout as JSON first, then fall back to finding JSON line.
-    // Biome may prefix output with warning lines about unstable options.
-    let biome_output: BiomeOutput = match serde_json::from_str(&stdout) {
-        Ok(o) => o,
-        Err(_) => {
-            let json_str = stdout
-                .lines()
-                .find(|line| line.trim_start().starts_with('{'))
-                .unwrap_or("");
+    match parse_linter_json::<BiomeOutput>(&stdout, &stderr, "biome") {
+        Some(o) => convert_diagnostics(o, content, file_path),
+        None => vec![],
+    }
+}
 
-            if json_str.is_empty() {
-                if !stdout.is_empty() || !stderr.is_empty() {
-                    eprintln!("guardrails: biome: no JSON in output (may have config issues)");
-                    if !stderr.is_empty() {
-                        eprintln!(
-                            "guardrails: biome stderr: {}",
-                            stderr.lines().next().unwrap_or("")
-                        );
-                    }
-                }
-                return vec![];
-            }
-
-            match serde_json::from_str(json_str) {
-                Ok(o) => o,
-                Err(e) => {
-                    eprintln!("guardrails: biome: JSON parse error: {}", e);
-                    return vec![];
-                }
-            }
-        }
-    };
-
+fn convert_diagnostics(output: BiomeOutput, content: &str, file_path: &str) -> Vec<Violation> {
     let line_offsets = build_line_offsets(content);
 
-    biome_output
+    output
         .diagnostics
         .into_iter()
         .map(|d| {
-            let severity = match d.severity.as_str() {
-                "error" => Severity::High,
-                "warning" => Severity::Medium,
-                _ => Severity::Low,
-            };
+            let severity = Severity::from_linter_str(&d.severity);
 
             let line = d.location.span.as_ref().map(|span| {
                 let offset = span.first().copied().unwrap_or(0) as usize;
@@ -169,7 +106,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
             Violation {
                 rule: format!("biome/{}", d.category),
                 severity,
-                failure: fix,
+                fix,
                 file: file_path.to_string(),
                 line,
             }
@@ -230,9 +167,18 @@ mod tests {
 
     #[test]
     fn get_fix_for_known_rule() {
-        assert!(get_fix_for_rule("lint/security/noGlobalEval").is_some());
-        assert!(get_fix_for_rule("lint/suspicious/noExplicitAny").is_some());
-        assert!(get_fix_for_rule("lint/a11y/useAltText").is_some());
+        assert_eq!(
+            get_fix_for_rule("lint/security/noGlobalEval"),
+            Some("Use JSON.parse() for data, or restructure to avoid dynamic code execution")
+        );
+        assert_eq!(
+            get_fix_for_rule("lint/suspicious/noExplicitAny"),
+            Some("Use `unknown` with type guards, or define a specific type/interface")
+        );
+        assert_eq!(
+            get_fix_for_rule("lint/a11y/useAltText"),
+            Some("Add alt attribute to img element")
+        );
     }
 
     #[test]

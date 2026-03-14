@@ -1,54 +1,28 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
-use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
-use once_cell::sync::Lazy;
+use crate::scanner::{
+    build_line_offsets, extract_delimited_content, offset_to_line, StringScanner,
+};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_CONSOLE_CALL: Lazy<Regex> = Lazy::new(|| {
+static RE_CONSOLE_CALL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"console\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_CONSOLE_CALL: invalid regex")
 });
 
-static RE_LOGGER_CALL: Lazy<Regex> = Lazy::new(|| {
+static RE_LOGGER_CALL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(logger|log)\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_LOGGER_CALL: invalid regex")
 });
 
-static RE_SENSITIVE_KEYWORD: Lazy<Regex> = Lazy::new(|| {
+static RE_SENSITIVE_KEYWORD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b")
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
 
-fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
-    let bytes = content.as_bytes();
-    let mut scanner = StringScanner::new(bytes, start);
-    let mut depth = 1;
-
-    while scanner.pos < bytes.len() && depth > 0 {
-        let in_context = scanner.skip_for_bracket_matching();
-        let byte = scanner.current();
-
-        scanner.advance();
-
-        if !in_context {
-            match byte {
-                Some(b'(') => depth += 1,
-                Some(b')') => depth -= 1,
-                _ => {}
-            }
-        }
-    }
-
-    if depth == 0 {
-        Some(&content[start..scanner.pos - 1])
-    } else {
-        None
-    }
-}
-
 fn is_in_comment(content: &str, pos: usize) -> bool {
-    let line_start = content[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let bytes = content.as_bytes();
-    let mut scanner = StringScanner::new(bytes, line_start);
+    let mut scanner = StringScanner::new(bytes, 0);
 
     while scanner.pos < pos {
         scanner.advance();
@@ -100,7 +74,7 @@ fn contains_sensitive_keyword(content: &str) -> bool {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
             let mut reported_lines = std::collections::HashSet::new();
             let line_offsets = build_line_offsets(content);
@@ -112,14 +86,14 @@ pub fn rule() -> Rule {
                 if is_in_comment(content, caps.start()) {
                     return;
                 }
-                if let Some(args) = extract_paren_content(content, caps.end()) {
+                if let Some(args) = extract_delimited_content(content, caps.end(), b'(', b')') {
                     if contains_sensitive_keyword(args) {
                         let line_num = offset_to_line(&line_offsets, caps.start());
                         if reported_lines.insert(line_num) {
                             violations.push(Violation {
                                 rule: super::rule_id::SENSITIVE_LOGGING.to_string(),
                                 severity: Severity::High,
-                                failure: msg.to_string(),
+                                fix: msg.to_string(),
                                 file: file_path.to_string(),
                                 line: Some(line_num as u32),
                             });
@@ -156,7 +130,11 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(content, "/src/auth/login.ts")
+        rule().check(
+            content,
+            "/src/auth/login.ts",
+            &crate::rules::non_comment_lines(content),
+        )
     }
 
     #[test]
@@ -247,6 +225,12 @@ mod tests {
     #[test]
     fn ignores_inline_block_comment() {
         let content = "console.log(/* password */ 'masked');";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn ignores_multiline_block_comment() {
+        let content = "/*\nconsole.log(password);\n*/";
         assert!(check(content).is_empty());
     }
 }

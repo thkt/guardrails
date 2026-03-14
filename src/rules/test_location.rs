@@ -1,11 +1,11 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_SRC_DIR: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"/src/").expect("RE_SRC_DIR: invalid regex"));
+static RE_SRC_DIR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/src/").expect("RE_SRC_DIR: invalid regex"));
 
-static TEST_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static TEST_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("test/spec pattern"),
         Regex::new(r"/__tests__/").expect("__tests__ dir pattern"),
@@ -16,7 +16,7 @@ static TEST_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             if !RE_SRC_DIR.is_match(file_path) {
                 return Vec::new();
             }
@@ -26,9 +26,8 @@ pub fn rule() -> Rule {
                     return vec![Violation {
                         rule: super::rule_id::TEST_LOCATION.to_string(),
                         severity: Severity::Medium,
-                        failure:
-                            "Test files should be in tests/ or __tests__/ directory outside src/"
-                                .to_string(),
+                        fix: "Test files should be in tests/ or __tests__/ directory outside src/"
+                            .to_string(),
                         file: file_path.to_string(),
                         line: None,
                     }];
@@ -44,7 +43,7 @@ mod tests {
     use super::*;
 
     fn check(path: &str) -> Vec<Violation> {
-        rule().check("", path)
+        rule().check("", path, &[])
     }
 
     #[test]

@@ -1,29 +1,29 @@
-use super::{find_non_comment_match, Rule, Severity, Violation, RE_TEST_FILE};
-use once_cell::sync::Lazy;
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_TEST_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
 struct FlakyPattern {
-    pattern: &'static Lazy<Regex>,
+    pattern: &'static LazyLock<Regex>,
     name: &'static str,
     reason: &'static str,
 }
 
-static RE_SET_TIMEOUT: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"setTimeout\s*\(").expect("RE_SET_TIMEOUT: invalid regex"));
+static RE_SET_TIMEOUT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"setTimeout\s*\(").expect("RE_SET_TIMEOUT: invalid regex"));
 
-static RE_SLEEP: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(sleep|delay|wait)\s*\(\s*\d").expect("RE_SLEEP: invalid regex"));
+static RE_SLEEP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(sleep|delay|wait)\s*\(\s*\d").expect("RE_SLEEP: invalid regex"));
 
-static RE_RANDOM: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"Math\.random\s*\(").expect("RE_RANDOM: invalid regex"));
+static RE_RANDOM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"Math\.random\s*\(").expect("RE_RANDOM: invalid regex"));
 
-static RE_DATE_NOW: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"Date\.now\s*\(\s*\)").expect("RE_DATE_NOW: invalid regex"));
+static RE_DATE_NOW: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"Date\.now\s*\(\s*\)").expect("RE_DATE_NOW: invalid regex"));
 
-static RE_NEW_DATE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"new\s+Date\s*\(\s*\)").expect("RE_NEW_DATE: invalid regex"));
+static RE_NEW_DATE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"new\s+Date\s*\(\s*\)").expect("RE_NEW_DATE: invalid regex"));
 
-static FLAKY_PATTERNS: Lazy<[FlakyPattern; 5]> = Lazy::new(|| {
+static FLAKY_PATTERNS: LazyLock<[FlakyPattern; 5]> = LazyLock::new(|| {
     [
         FlakyPattern {
             pattern: &RE_SET_TIMEOUT,
@@ -56,18 +56,15 @@ static FLAKY_PATTERNS: Lazy<[FlakyPattern; 5]> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_TEST_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
             for pattern in FLAKY_PATTERNS.iter() {
-                if let Some(line_num) = find_non_comment_match(content, pattern.pattern) {
+                if let Some(line_num) = find_match_in_lines(lines, pattern.pattern) {
                     violations.push(Violation {
                         rule: super::rule_id::FLAKY_TEST.to_string(),
                         severity: Severity::Low,
-                        failure: format!(
-                            "{} can cause flaky tests. {}",
-                            pattern.name, pattern.reason
-                        ),
+                        fix: format!("{} can cause flaky tests. {}", pattern.name, pattern.reason),
                         file: file_path.to_string(),
                         line: Some(line_num),
                     });
@@ -84,7 +81,11 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(content, "/src/utils.test.ts")
+        rule().check(
+            content,
+            "/src/utils.test.ts",
+            &crate::rules::non_comment_lines(content),
+        )
     }
 
     #[test]
@@ -100,7 +101,7 @@ mod tests {
             let content = format!("it('test', () => {{ {} }});", code);
             let violations = check(&content);
             assert_eq!(violations.len(), 1, "Should detect: {}", expected);
-            assert!(violations[0].failure.contains(expected));
+            assert!(violations[0].fix.contains(expected));
         }
     }
 

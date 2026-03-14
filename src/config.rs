@@ -115,7 +115,6 @@ impl Config {
             None => return Ok(self),
         };
 
-        // Try .claude/tools.json first, then legacy .claude-guardrails.json
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
         if tools_path.exists() {
             let content = fs::read_to_string(&tools_path)

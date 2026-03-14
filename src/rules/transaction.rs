@@ -1,20 +1,18 @@
-use super::{
-    count_non_comment_matches, find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE,
-};
-use once_cell::sync::Lazy;
+use super::{count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_TARGET_DIR: Lazy<Regex> = Lazy::new(|| {
+static RE_TARGET_DIR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"/(usecases?|use-cases?|application|services?|domain|handlers?|app)/")
         .expect("RE_TARGET_DIR: invalid regex")
 });
 
-static RE_WRITE_OPS: Lazy<Regex> = Lazy::new(|| {
+static RE_WRITE_OPS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\.(save|create|update|delete|insert|persist)\s*\(")
         .expect("RE_WRITE_OPS: invalid regex")
 });
 
-static RE_TX_BOUNDARY: Lazy<Regex> = Lazy::new(|| {
+static RE_TX_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(@Transactional|\btransaction\b|\$transaction|\bunitOfWork\b|\brunInTransaction\b|\bwithTransaction\b|\bbeginTransaction\b|\bQueryRunner\b|\bgetManager\b|knex\.transaction|sequelize\.transaction|db\.transaction)",
     )
@@ -24,29 +22,29 @@ static RE_TX_BOUNDARY: Lazy<Regex> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             if !RE_TARGET_DIR.is_match(file_path) {
                 return Vec::new();
             }
 
-            let write_count = count_non_comment_matches(content, &RE_WRITE_OPS);
+            let write_count = count_matches_in_lines(lines, &RE_WRITE_OPS);
             if write_count < 2 {
                 return Vec::new();
             }
 
-            if find_non_comment_match(content, &RE_TX_BOUNDARY).is_some() {
+            if find_match_in_lines(lines, &RE_TX_BOUNDARY).is_some() {
                 return Vec::new();
             }
 
             vec![Violation {
                 rule: super::rule_id::TRANSACTION_BOUNDARY.to_string(),
                 severity: Severity::Medium,
-                failure: format!(
+                fix: format!(
                     "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {} write ops detected",
                     write_count
                 ),
                 file: file_path.to_string(),
-                line: find_non_comment_match(content, &RE_WRITE_OPS),
+                line: find_match_in_lines(lines, &RE_WRITE_OPS),
             }]
         }),
     }
@@ -57,7 +55,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path)
+        rule().check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -70,7 +68,7 @@ mod tests {
         "#;
         let violations = check(content, "/src/usecases/handler.ts");
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("2 write ops"));
+        assert!(violations[0].fix.contains("2 write ops"));
     }
 
     #[test]

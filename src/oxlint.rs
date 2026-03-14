@@ -1,10 +1,9 @@
-use crate::resolve::resolve_bin;
+use crate::parse_json::parse_linter_json;
+use crate::resolve::{resolve_bin, run_with_timeout};
 use crate::rules::{Severity, Violation};
+use crate::tempfile_util::write_temp;
 use serde::Deserialize;
-use std::io::Write;
-use std::path::Path;
 use std::process::Command;
-use tempfile::Builder;
 
 #[derive(Debug, Deserialize)]
 struct OxlintOutput {
@@ -32,47 +31,15 @@ struct OxlintSpan {
 }
 
 pub fn is_available(file_path: &str) -> bool {
-    Command::new(resolve_bin("oxlint", file_path))
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::resolve::is_tool_available("oxlint", file_path)
 }
 
-/// Creates temp file in same directory as file_path to inherit project's oxlint config.
+/// Fail-open: returns empty violations on any error.
 pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    let path = Path::new(file_path);
-    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
-
-    let temp_dir = std::env::temp_dir();
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
-        .unwrap_or(&temp_dir);
-
-    let temp_file = match Builder::new()
-        .suffix(&format!(".{}", extension))
-        .tempfile_in(dir)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("guardrails: oxlint: failed to create temp file: {}", e);
-            return vec![];
-        }
+    let temp_file = match write_temp(content, file_path, "oxlint") {
+        Some(f) => f,
+        None => return vec![],
     };
-
-    if let Err(e) = temp_file.as_file().write_all(content.as_bytes()) {
-        eprintln!("guardrails: oxlint: failed to write temp file: {}", e);
-        return vec![];
-    }
-
-    if let Err(e) = temp_file.as_file().flush() {
-        eprintln!(
-            "guardrails: oxlint: failed to flush temp file before lint: {}",
-            e
-        );
-        return vec![];
-    }
 
     let temp_path_str = match temp_file.path().to_str() {
         Some(s) => s,
@@ -82,49 +49,20 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    let output = match Command::new(resolve_bin("oxlint", file_path))
-        .args(["--format", "json", temp_path_str])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("guardrails: oxlint: failed to execute: {}", e);
-            return vec![];
-        }
+    let output = match run_with_timeout(
+        Command::new(resolve_bin("oxlint", file_path)).args(["--format", "json", temp_path_str]),
+        "oxlint",
+    ) {
+        Some(o) => o,
+        None => return vec![],
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
-    match serde_json::from_str::<OxlintOutput>(&stdout) {
-        Ok(o) => convert_diagnostics(o, file_path),
-        Err(_) => {
-            let json_str = stdout
-                .lines()
-                .find(|line| line.trim_start().starts_with('{'))
-                .unwrap_or("");
-
-            if json_str.is_empty() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !stdout.is_empty() || !stderr.is_empty() {
-                    eprintln!("guardrails: oxlint: no JSON in output (may have config issues)");
-                    if !stderr.is_empty() {
-                        eprintln!(
-                            "guardrails: oxlint stderr: {}",
-                            stderr.lines().next().unwrap_or("")
-                        );
-                    }
-                }
-                return vec![];
-            }
-
-            match serde_json::from_str::<OxlintOutput>(json_str) {
-                Ok(o) => convert_diagnostics(o, file_path),
-                Err(e) => {
-                    eprintln!("guardrails: oxlint: JSON parse error: {}", e);
-                    vec![]
-                }
-            }
-        }
+    match parse_linter_json::<OxlintOutput>(&stdout, &stderr, "oxlint") {
+        Some(o) => convert_diagnostics(o, file_path),
+        None => vec![],
     }
 }
 
@@ -133,16 +71,12 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
         .diagnostics
         .into_iter()
         .map(|d| {
-            let severity = match d.severity.as_str() {
-                "error" => Severity::High,
-                "warning" => Severity::Medium,
-                _ => Severity::Low,
-            };
+            let severity = Severity::from_linter_str(&d.severity);
 
             Violation {
                 rule: format!("oxlint/{}", d.code),
                 severity,
-                failure: d.help.unwrap_or(d.message),
+                fix: d.help.unwrap_or(d.message),
                 file: file_path.to_string(),
                 line: d.labels.first().map(|l| l.span.line),
             }
@@ -183,7 +117,7 @@ mod tests {
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].rule, "oxlint/eslint(no-debugger)");
         assert_eq!(violations[0].severity, Severity::High);
-        assert_eq!(violations[0].failure, "Remove the debugger statement");
+        assert_eq!(violations[0].fix, "Remove the debugger statement");
         assert_eq!(violations[0].line, Some(5));
         assert_eq!(violations[0].file, "test.js");
     }
@@ -196,30 +130,6 @@ mod tests {
     }
 
     #[test]
-    fn severity_mapping() {
-        let make_json = |severity: &str| {
-            format!(
-                r#"{{"diagnostics": [{{
-                    "message": "msg",
-                    "code": "rule",
-                    "severity": "{}",
-                    "labels": []
-                }}]}}"#,
-                severity
-            )
-        };
-
-        let high = parse_diagnostics(&make_json("error"), "f");
-        assert_eq!(high[0].severity, Severity::High);
-
-        let medium = parse_diagnostics(&make_json("warning"), "f");
-        assert_eq!(medium[0].severity, Severity::Medium);
-
-        let low = parse_diagnostics(&make_json("info"), "f");
-        assert_eq!(low[0].severity, Severity::Low);
-    }
-
-    #[test]
     fn help_fallback_to_message() {
         let json = r#"{"diagnostics": [{
             "message": "This is the message",
@@ -229,7 +139,7 @@ mod tests {
         }]}"#;
 
         let violations = parse_diagnostics(json, "f");
-        assert_eq!(violations[0].failure, "This is the message");
+        assert_eq!(violations[0].fix, "This is the message");
     }
 
     #[test]

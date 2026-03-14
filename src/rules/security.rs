@@ -1,41 +1,41 @@
-use super::{non_comment_lines, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_HTML_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(jsx?|tsx?|html?)$").expect("RE_HTML_FILE: invalid regex"));
+static RE_HTML_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(jsx?|tsx?|html?)$").expect("RE_HTML_FILE: invalid regex"));
 
-static RE_DOC_WRITE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"document\.write\s*\(").expect("RE_DOC_WRITE: invalid regex"));
-static RE_INNER_HTML: Lazy<Regex> = Lazy::new(|| {
+static RE_DOC_WRITE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"document\.write\s*\(").expect("RE_DOC_WRITE: invalid regex"));
+static RE_INNER_HTML: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\.innerHTML\s*=\s*[^"'`\s;]"#).expect("RE_INNER_HTML: invalid regex")
 });
-static RE_OUTER_HTML: Lazy<Regex> = Lazy::new(|| {
+static RE_OUTER_HTML: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\.outerHTML\s*=\s*[^"'`\s;]"#).expect("RE_OUTER_HTML: invalid regex")
 });
-static RE_SET_TIMEOUT_STR: Lazy<Regex> = Lazy::new(|| {
+static RE_SET_TIMEOUT_STR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"setTimeout\s*\(\s*['"`]"#).expect("RE_SET_TIMEOUT_STR: invalid regex")
 });
-static RE_SET_INTERVAL_STR: Lazy<Regex> = Lazy::new(|| {
+static RE_SET_INTERVAL_STR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"setInterval\s*\(\s*['"`]"#).expect("RE_SET_INTERVAL_STR: invalid regex")
 });
-static RE_POST_MESSAGE_STAR: Lazy<Regex> = Lazy::new(|| {
+static RE_POST_MESSAGE_STAR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\.postMessage\s*\([^,]+,\s*['"`]\*['"`]\s*\)"#)
         .expect("RE_POST_MESSAGE_STAR: invalid regex")
 });
-static RE_LOCAL_STORAGE_SENSITIVE: Lazy<Regex> = Lazy::new(|| {
+static RE_LOCAL_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"localStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#)
         .expect("RE_LOCAL_STORAGE_SENSITIVE: invalid regex")
 });
-static RE_SESSION_STORAGE_SENSITIVE: Lazy<Regex> = Lazy::new(|| {
+static RE_SESSION_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"sessionStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#)
         .expect("RE_SESSION_STORAGE_SENSITIVE: invalid regex")
 });
 
 struct SecurityIssue {
-    pattern: &'static Lazy<Regex>,
-    file_pattern: &'static Lazy<Regex>,
-    failure: &'static str,
+    pattern: &'static LazyLock<Regex>,
+    file_pattern: &'static LazyLock<Regex>,
+    fix: &'static str,
     severity: Severity,
 }
 
@@ -43,49 +43,49 @@ static SECURITY_ISSUES: [SecurityIssue; 8] = [
     SecurityIssue {
         pattern: &RE_DOC_WRITE,
         file_pattern: &RE_HTML_FILE,
-        failure: "Use createElement/appendChild instead",
+        fix: "Use createElement/appendChild instead",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_INNER_HTML,
         file_pattern: &RE_HTML_FILE,
-        failure: "Use textContent or DOMPurify.sanitize() instead",
+        fix: "Use textContent or DOMPurify.sanitize() instead",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_SET_TIMEOUT_STR,
         file_pattern: &RE_JS_FILE,
-        failure: "Use function reference: setTimeout(() => { ... }, delay)",
+        fix: "Use function reference: setTimeout(() => { ... }, delay)",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_SET_INTERVAL_STR,
         file_pattern: &RE_JS_FILE,
-        failure: "Use function reference: setInterval(() => { ... }, delay)",
+        fix: "Use function reference: setInterval(() => { ... }, delay)",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_POST_MESSAGE_STAR,
         file_pattern: &RE_JS_FILE,
-        failure: "Specify exact target origin instead of '*'",
+        fix: "Specify exact target origin instead of '*'",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_OUTER_HTML,
         file_pattern: &RE_HTML_FILE,
-        failure: "Use DOM methods instead",
+        fix: "Use DOM methods instead",
         severity: Severity::Medium,
     },
     SecurityIssue {
         pattern: &RE_LOCAL_STORAGE_SENSITIVE,
         file_pattern: &RE_JS_FILE,
-        failure: "Use httpOnly cookies for sensitive data",
+        fix: "Use httpOnly cookies for sensitive data",
         severity: Severity::Medium,
     },
     SecurityIssue {
         pattern: &RE_SESSION_STORAGE_SENSITIVE,
         file_pattern: &RE_JS_FILE,
-        failure: "Use httpOnly cookies for sensitive data",
+        fix: "Use httpOnly cookies for sensitive data",
         severity: Severity::Medium,
     },
 ];
@@ -93,19 +93,19 @@ static SECURITY_ISSUES: [SecurityIssue; 8] = [
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
             for issue in SECURITY_ISSUES.iter() {
                 if !issue.file_pattern.is_match(file_path) {
                     continue;
                 }
-                for (line_num, line) in non_comment_lines(content) {
+                for &(line_num, line) in lines {
                     if issue.pattern.is_match(line) {
                         violations.push(Violation {
                             rule: super::rule_id::SECURITY.to_string(),
                             severity: issue.severity,
-                            failure: issue.failure.to_string(),
+                            fix: issue.fix.to_string(),
                             file: file_path.to_string(),
                             line: Some(line_num),
                         });
@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path)
+        rule().check(content, path, &crate::rules::non_comment_lines(content))
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         let v = check("document.write(userInput);", "/src/render.tsx");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].severity, Severity::High);
-        assert!(v[0].failure.contains("createElement"));
+        assert!(v[0].fix.contains("createElement"));
     }
 
     // Known limitation: `"" + variable` starts with quote, so regex excludes it

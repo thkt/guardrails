@@ -1,37 +1,37 @@
-use super::{find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
-use once_cell::sync::Lazy;
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
+use std::sync::LazyLock;
 
 struct LargeImport {
-    pattern: &'static Lazy<Regex>,
+    pattern: &'static LazyLock<Regex>,
     package: &'static str,
     suggestion: &'static str,
 }
 
-static RE_LODASH_FULL: Lazy<Regex> = Lazy::new(|| {
+static RE_LODASH_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"import\s+[\w]+\s+from\s+['"]lodash['"]"#).expect("RE_LODASH_FULL: invalid regex")
 });
 
-static RE_MOMENT_FULL: Lazy<Regex> = Lazy::new(|| {
+static RE_MOMENT_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"import\s+[\w]+\s+from\s+['"]moment['"]"#).expect("RE_MOMENT_FULL: invalid regex")
 });
 
-static RE_MUI_ICONS_FULL: Lazy<Regex> = Lazy::new(|| {
+static RE_MUI_ICONS_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]@mui/icons-material['"]"#)
         .expect("RE_MUI_ICONS_FULL: invalid regex")
 });
 
-static RE_DATE_FNS_FULL: Lazy<Regex> = Lazy::new(|| {
+static RE_DATE_FNS_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]date-fns['"]"#)
         .expect("RE_DATE_FNS_FULL: invalid regex")
 });
 
-static RE_RXJS_FULL: Lazy<Regex> = Lazy::new(|| {
+static RE_RXJS_FULL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]rxjs['"]"#)
         .expect("RE_RXJS_FULL: invalid regex")
 });
 
-static LARGE_IMPORTS: Lazy<[LargeImport; 5]> = Lazy::new(|| {
+static LARGE_IMPORTS: LazyLock<[LargeImport; 5]> = LazyLock::new(|| {
     [
         LargeImport {
             pattern: &RE_LODASH_FULL,
@@ -64,15 +64,15 @@ static LARGE_IMPORTS: Lazy<[LargeImport; 5]> = Lazy::new(|| {
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
             for import in LARGE_IMPORTS.iter() {
-                if let Some(line_num) = find_non_comment_match(content, import.pattern) {
+                if let Some(line_num) = find_match_in_lines(lines, import.pattern) {
                     violations.push(Violation {
                         rule: super::rule_id::BUNDLE_SIZE.to_string(),
                         severity: Severity::Medium,
-                        failure: format!(
+                        fix: format!(
                             "Full {} import increases bundle size. {}",
                             import.package, import.suggestion
                         ),
@@ -92,7 +92,11 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(content, "/src/utils/helper.ts")
+        rule().check(
+            content,
+            "/src/utils/helper.ts",
+            &crate::rules::non_comment_lines(content),
+        )
     }
 
     #[test]
@@ -100,7 +104,7 @@ mod tests {
         let content = r#"import _ from 'lodash';"#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("lodash"));
+        assert!(violations[0].fix.contains("lodash"));
     }
 
     #[test]
@@ -108,7 +112,7 @@ mod tests {
         let content = r#"import moment from 'moment';"#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("moment"));
+        assert!(violations[0].fix.contains("moment"));
     }
 
     #[test]

@@ -1,48 +1,22 @@
 use super::{Rule, Severity, Violation, RE_TEST_FILE};
-use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
-use once_cell::sync::Lazy;
+use crate::scanner::{build_line_offsets, extract_delimited_content, offset_to_line};
 use regex::Regex;
+use std::sync::LazyLock;
 
-static RE_TEST_START: Lazy<Regex> = Lazy::new(|| {
+static RE_TEST_START: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#)
         .expect("RE_TEST_START: invalid regex")
 });
 
-static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
+static RE_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(expect\s*\(|assert\.|should\.|\.toEqual|\.toBe|\.toHaveBeenCalled|\.rejects\.|\.resolves\.)")
         .expect("RE_ASSERTION: invalid regex")
 });
 
-fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
-    let bytes = content.as_bytes();
-    let mut scanner = StringScanner::new(bytes, start);
-    let mut depth = 1;
-
-    while scanner.pos < bytes.len() && depth > 0 {
-        let byte = scanner.current();
-        let in_context = scanner.skip_for_bracket_matching();
-        scanner.advance();
-
-        if !in_context {
-            match byte {
-                Some(b'{') => depth += 1,
-                Some(b'}') => depth -= 1,
-                _ => {}
-            }
-        }
-    }
-
-    if depth == 0 {
-        Some(&content[start..scanner.pos - 1])
-    } else {
-        None
-    }
-}
-
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_TEST_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str| {
+        checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
             let line_offsets = build_line_offsets(content);
 
@@ -50,7 +24,8 @@ pub fn rule() -> Rule {
                 let test_name = caps.get(2).map(|m| m.as_str()).unwrap_or("unknown");
                 let match_end = caps.get(0).map(|m| m.end()).unwrap_or(0);
 
-                let test_body = extract_brace_content(content, match_end).unwrap_or("");
+                let test_body =
+                    extract_delimited_content(content, match_end, b'{', b'}').unwrap_or("");
 
                 if RE_ASSERTION.is_match(test_body) {
                     continue;
@@ -67,7 +42,7 @@ pub fn rule() -> Rule {
                 violations.push(Violation {
                     rule: super::rule_id::TEST_ASSERTION.to_string(),
                     severity: Severity::Medium,
-                    failure: format!(
+                    fix: format!(
                         "Test '{}' has no assertions. Add expect() or assert calls.",
                         test_name
                     ),
@@ -86,7 +61,11 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(content, "/src/utils.test.ts")
+        rule().check(
+            content,
+            "/src/utils.test.ts",
+            &crate::rules::non_comment_lines(content),
+        )
     }
 
     #[test]
@@ -98,7 +77,7 @@ mod tests {
         "#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("should do something"));
+        assert!(violations[0].fix.contains("should do something"));
     }
 
     #[test]
