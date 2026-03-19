@@ -58,6 +58,7 @@ jobs:
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
+        shell: bash
         run: |
           if [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
