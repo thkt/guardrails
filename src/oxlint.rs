@@ -1,8 +1,9 @@
 use crate::parse_json::parse_linter_json;
-use crate::resolve::{resolve_bin, run_with_timeout};
+use crate::resolve::run_with_timeout;
 use crate::rules::{Severity, Violation};
 use crate::tempfile_util::write_temp;
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
@@ -30,12 +31,12 @@ struct OxlintSpan {
     line: u32,
 }
 
-pub fn is_available(file_path: &str) -> bool {
-    crate::resolve::is_tool_available("oxlint", file_path)
+pub fn resolve(file_path: &str) -> Option<PathBuf> {
+    crate::resolve::try_resolve_bin("oxlint", file_path)
 }
 
 /// Fail-open: returns empty violations on any error.
-pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
+pub fn check(content: &str, file_path: &str, bin: &Path) -> Vec<Violation> {
     let temp_file = match write_temp(content, file_path, "oxlint") {
         Some(f) => f,
         None => return vec![],
@@ -50,7 +51,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     };
 
     let output = match run_with_timeout(
-        Command::new(resolve_bin("oxlint", file_path)).args(["--format", "json", temp_path_str]),
+        Command::new(bin).args(["--format", "json", temp_path_str]),
         "oxlint",
     ) {
         Some(o) => o,

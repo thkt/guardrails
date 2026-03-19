@@ -1,14 +1,8 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
-
-pub fn is_tool_available(name: &str, file_path: &str) -> bool {
-    Command::new(resolve_bin(name, file_path))
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+use std::sync::mpsc;
+use std::time::Duration;
 
 const LINTER_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -21,50 +15,75 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &str) -> Option<Output> {
         }
     };
 
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|e| {
-                        eprintln!("guardrails: {}: failed to collect output: {}", tool, e);
-                        e
-                    })
-                    .ok();
-            }
-            Ok(None) => {
-                if start.elapsed() > LINTER_TIMEOUT {
-                    eprintln!(
-                        "guardrails: {}: timed out after {}s, skipping",
-                        tool,
-                        LINTER_TIMEOUT.as_secs()
-                    );
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(e) => {
-                eprintln!("guardrails: {}: process error: {}", tool, e);
-                return None;
-            }
+    let child_pid = child.id();
+
+    let mut stdout = child.stdout.take()?;
+    let mut stderr = child.stderr.take()?;
+    let out_t = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let err_t = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        buf
+    });
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait());
+    });
+
+    let status = match rx.recv_timeout(LINTER_TIMEOUT) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            eprintln!("guardrails: {}: process error: {}", tool, e);
+            return None;
         }
-    }
+        Err(_) => {
+            eprintln!(
+                "guardrails: {}: timed out after {}s, skipping",
+                tool,
+                LINTER_TIMEOUT.as_secs()
+            );
+            let _ = Command::new("kill")
+                .args(["-9", &child_pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            return None;
+        }
+    };
+
+    Some(Output {
+        status,
+        stdout: out_t.join().unwrap_or_else(|_| {
+            eprintln!("guardrails: {tool}: stdout reader thread panicked");
+            Vec::new()
+        }),
+        stderr: err_t.join().unwrap_or_else(|_| {
+            eprintln!("guardrails: {tool}: stderr reader thread panicked");
+            Vec::new()
+        }),
+    })
 }
 
-/// Falls back to bare command name (PATH resolution) if not found in node_modules.
-pub fn resolve_bin(name: &str, file_path: &str) -> PathBuf {
+/// Resolves a tool binary, checking node_modules first, then PATH.
+pub fn try_resolve_bin(name: &str, file_path: &str) -> Option<PathBuf> {
     let mut dir = Path::new(file_path).parent();
     while let Some(d) = dir {
         let candidate = d.join("node_modules/.bin").join(name);
         if candidate.exists() {
-            return candidate;
+            return Some(candidate);
         }
         dir = d.parent();
     }
-    PathBuf::from(name)
+    std::env::var("PATH").ok().and_then(|path_var| {
+        std::env::split_paths(&path_var)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.exists())
+    })
 }
 
 #[cfg(test)]
@@ -82,8 +101,8 @@ mod tests {
         fs::write(&bin_path, "").unwrap();
 
         let file_path = tmp.path().join("src/app.ts");
-        let result = resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, bin_path);
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
+        assert_eq!(result, Some(bin_path));
     }
 
     #[test]
@@ -98,17 +117,17 @@ mod tests {
         fs::create_dir_all(&deep_dir).unwrap();
         let file_path = deep_dir.join("Button.tsx");
 
-        let result = resolve_bin("biome", file_path.to_str().unwrap());
-        assert_eq!(result, bin_path);
+        let result = try_resolve_bin("biome", file_path.to_str().unwrap());
+        assert_eq!(result, Some(bin_path));
     }
 
     #[test]
-    fn falls_back_to_bare_name_when_not_in_node_modules() {
+    fn returns_none_when_not_found() {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("test.ts");
 
-        let result = resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, PathBuf::from("oxlint"));
+        let result = try_resolve_bin("nonexistent_tool_xyz", file_path.to_str().unwrap());
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -126,7 +145,7 @@ mod tests {
         fs::write(nested_bin.join("oxlint"), "nested").unwrap();
 
         let file_path = tmp.path().join("packages/app/src/index.ts");
-        let result = resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, nested_bin.join("oxlint"));
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
+        assert_eq!(result, Some(nested_bin.join("oxlint")));
     }
 }

@@ -1,9 +1,10 @@
 use crate::parse_json::parse_linter_json;
-use crate::resolve::{resolve_bin, run_with_timeout};
+use crate::resolve::run_with_timeout;
 use crate::rules::{Severity, Violation};
 use crate::scanner::{build_line_offsets, offset_to_line};
 use crate::tempfile_util::write_temp;
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
@@ -45,12 +46,12 @@ struct BiomeLocation {
     span: Option<Vec<u32>>,
 }
 
-pub fn is_available(file_path: &str) -> bool {
-    crate::resolve::is_tool_available("biome", file_path)
+pub fn resolve(file_path: &str) -> Option<PathBuf> {
+    crate::resolve::try_resolve_bin("biome", file_path)
 }
 
 /// Fail-open: returns empty violations on any error.
-pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
+pub fn check(content: &str, file_path: &str, bin: &Path) -> Vec<Violation> {
     let temp_file = match write_temp(content, file_path, "biome") {
         Some(f) => f,
         None => return vec![],
@@ -65,11 +66,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     };
 
     let output = match run_with_timeout(
-        Command::new(resolve_bin("biome", file_path)).args([
-            "lint",
-            "--reporter=json",
-            temp_path_str,
-        ]),
+        Command::new(bin).args(["lint", "--reporter=json", temp_path_str]),
         "biome",
     ) {
         Some(o) => o,

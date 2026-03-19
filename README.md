@@ -9,6 +9,7 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 - **oxlint integration** (priority): Lint rules from [oxc.rs](https://oxc.rs) with ESLint plugin compatibility
 - **biome integration** (fallback): 300+ lint rules from [biomejs.dev](https://biomejs.dev)
 - **Custom rules**: Security patterns external linters don't cover (JS/TS)
+- **AST-based security checks**: Deep analysis via [oxc](https://oxc.rs) parser (command injection, stack exposure, path traversal)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
 
 ## Installation
@@ -105,27 +106,38 @@ See `src/rules/` for custom rules that complement external linters.
 
 ### Rules
 
-| Rule               | Severity | Description                                     | When to disable                                  |
-| ------------------ | -------- | ----------------------------------------------- | ------------------------------------------------ |
-| `sensitiveFile`    | Critical | Blocks writes to .env, credentials.\*, \*.pem   | Never (security critical)                        |
-| `cryptoWeak`       | High     | Detects MD5, SHA1, DES, RC4 usage               | Legacy system maintenance with known constraints |
-| `sensitiveLogging` | High     | Detects password/token/secret in console.log    | Never (security critical)                        |
-| `security`         | High     | XSS vectors, unsafe APIs, postMessage           | Never (security critical)                        |
-| `architecture`     | High     | Layer violations (e.g., UI importing domain)    | Small projects, monoliths, or scripts            |
-| `eval`             | High     | eval(), new Function(), indirect eval           | Never (security critical)                        |
-| `hardcodedSecrets` | High     | API keys, tokens, passwords in source           | Never (security critical)                        |
-| `openRedirect`     | High     | location.href/assign with user-controlled input | Non-web projects                                 |
-| `rawHtml`          | High     | HTML concatenation with variables               | Non-web projects                                 |
-| `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                  | Development-only configs                         |
-| `transaction`      | Medium   | Multiple writes without transaction wrapper     | Non-database projects                            |
-| `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)    | Non-React projects, or vanilla JS/TS             |
-| `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop) | CLI tools, build scripts, or sync-only contexts  |
-| `bundleSize`       | Medium   | Full lodash/moment imports                      | Backend/Node.js (no bundle size concerns)        |
-| `testAssertion`    | Medium   | Tests without expect() or assert calls          | Playwright, custom test frameworks               |
-| `flakyTest`        | Low      | setTimeout, Math.random in tests                | Intentional timing/randomness tests              |
-| `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits         | No code generation in project                    |
-| `testLocation`     | Medium   | Test files in src/ directory                    | Co-located test strategy (tests next to source)  |
-| `naming`           | Mixed    | Naming conventions (hooks, components, types)   | Different naming conventions in team/project     |
+| Rule               | Severity | Description                                                              | When to disable                                  |
+| ------------------ | -------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| `sensitiveFile`    | Critical | Blocks writes to .env, credentials.\*, \*.pem                            | Never (security critical)                        |
+| `cryptoWeak`       | High     | Detects MD5, SHA1, DES, RC4 usage                                        | Legacy system maintenance with known constraints |
+| `sensitiveLogging` | High     | Detects password/token/secret in console.log                             | Never (security critical)                        |
+| `security`         | High     | XSS vectors, unsafe APIs, postMessage                                    | Never (security critical)                        |
+| `architecture`     | High     | Layer violations (e.g., UI importing domain)                             | Small projects, monoliths, or scripts            |
+| `eval`             | High     | eval(), new Function(), indirect eval                                    | Never (security critical)                        |
+| `hardcodedSecrets` | High     | API keys, tokens, passwords in source                                    | Never (security critical)                        |
+| `openRedirect`     | High     | location.href/assign with user-controlled input                          | Non-web projects                                 |
+| `rawHtml`          | High     | HTML concatenation with variables                                        | Non-web projects                                 |
+| `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                         |
+| `transaction`      | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                            |
+| `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS             |
+| `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts  |
+| `bundleSize`       | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)        |
+| `testAssertion`    | Medium   | Tests without expect() or assert calls                                   | Playwright, custom test frameworks               |
+| `flakyTest`        | Low      | setTimeout, Math.random in tests                                         | Intentional timing/randomness tests              |
+| `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits                                  | No code generation in project                    |
+| `testLocation`     | Medium   | Test files in src/ directory                                             | Co-located test strategy (tests next to source)  |
+| `naming`           | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project     |
+| `astSecurity`      | Mixed    | AST-based: command injection, stack exposure, path traversal (see below) | Non-Node.js projects                             |
+
+### AST Security Rules (`astSecurity`)
+
+Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the AST directly, avoiding the false negatives of regex-based pattern matching.
+
+| Sub-rule                  | Severity | Description                                                     |
+| ------------------------- | -------- | --------------------------------------------------------------- |
+| `child-process-injection` | High     | Non-literal args to exec/execSync/spawn/spawnSync               |
+| `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send) |
+| `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk)     |
 
 ## Exit Codes
 
@@ -172,7 +184,8 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
       "generatedFile": true,
       "testLocation": true,
       "naming": true,
-      "flakyTest": true
+      "flakyTest": true,
+      "astSecurity": true
     },
     "severity": {
       "blockOn": ["critical", "high"]
@@ -307,12 +320,12 @@ different phase — install the full suite for comprehensive coverage:
 brew install thkt/tap/guardrails thkt/tap/formatter thkt/tap/reviews thkt/tap/gates
 ```
 
-| Tool                                             | Hook        | Timing            | Role                              |
-| ------------------------------------------------ | ----------- | ----------------- | --------------------------------- |
-| **guardrails**                                   | PreToolUse  | Before Write/Edit | Lint + security checks            |
-| [formatter](https://github.com/thkt/formatter)   | PostToolUse | After Write/Edit  | Auto code formatting              |
-| [reviews](https://github.com/thkt/reviews)       | PreToolUse  | Before Skill      | Static analysis context injection |
-| [gates](https://github.com/thkt/gates)           | Stop        | Agent completion  | Quality gates (knip, tsgo, madge) |
+| Tool                                           | Hook        | Timing            | Role                              |
+| ---------------------------------------------- | ----------- | ----------------- | --------------------------------- |
+| **guardrails**                                 | PreToolUse  | Before Write/Edit | Lint + security checks            |
+| [formatter](https://github.com/thkt/formatter) | PostToolUse | After Write/Edit  | Auto code formatting              |
+| [reviews](https://github.com/thkt/reviews)     | PreToolUse  | Before Skill      | Static analysis context injection |
+| [gates](https://github.com/thkt/gates)         | Stop        | Agent completion  | Quality gates (knip, tsgo, madge) |
 
 See [thkt/tap](https://github.com/thkt/homebrew-tap) for setup details.
 

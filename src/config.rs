@@ -54,6 +54,7 @@ define_rule_config! {
     http_resource     => "httpResource",
     raw_html          => "rawHtml",
     open_redirect     => "openRedirect",
+    ast_security      => "astSecurity",
 }
 
 #[derive(Debug, Clone)]
@@ -109,10 +110,8 @@ struct ToolsConfig {
 
 impl Config {
     pub fn with_project_overrides(self, file_path: &str) -> Result<Self, String> {
-        let git_root = Self::find_git_root(file_path);
-        let git_root = match git_root {
-            Some(r) => r,
-            None => return Ok(self),
+        let Some(git_root) = Self::find_git_root(file_path) else {
+            return Ok(self);
         };
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
@@ -178,6 +177,7 @@ mod tests {
         assert!(config.rules.sensitive_file);
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
+        assert!(config.rules.ast_security);
     }
 
     #[test]
@@ -217,6 +217,17 @@ mod tests {
         assert!(!merged.rules.biome);
         assert!(!merged.rules.oxlint);
         assert!(merged.rules.sensitive_file);
+        assert!(merged.rules.security);
+    }
+
+    #[test]
+    fn merge_ast_security_disabled() {
+        let base = Config::default();
+        let project: ProjectConfig =
+            serde_json::from_str(r#"{"rules": {"astSecurity": false}}"#).unwrap();
+
+        let merged = base.merge(project);
+        assert!(!merged.rules.ast_security);
         assert!(merged.rules.security);
     }
 
@@ -338,6 +349,18 @@ mod tests {
         let result = Config::default().with_project_overrides(file_path.to_str().unwrap());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid config"));
+    }
+
+    #[test]
+    fn with_project_overrides_malformed_legacy_config_returns_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::write(tmp.path().join(LEGACY_CONFIG_FILE), "not valid json{{{").unwrap();
+
+        let file_path = tmp.path().join("src/app.ts");
+        let result = Config::default().with_project_overrides(file_path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid project config"));
     }
 
     #[test]

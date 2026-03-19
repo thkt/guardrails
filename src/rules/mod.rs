@@ -43,6 +43,9 @@ pub(crate) mod rule_id {
     pub const HTTP_RESOURCE: &str = "http-resource";
     pub const RAW_HTML: &str = "raw-html";
     pub const OPEN_REDIRECT: &str = "open-redirect";
+    pub const ERR_STACK_EXPOSURE: &str = "err-stack-exposure";
+    pub const CHILD_PROCESS_INJECTION: &str = "child-process-injection";
+    pub const NON_LITERAL_FS_PATH: &str = "non-literal-fs-path";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -225,7 +228,7 @@ mod tests {
 
     #[test]
     fn block_comment_body_without_star_prefix() {
-        // This was the INT-001 bug: body lines without `* ` prefix leaked through
+        // Body lines without `* ` prefix must still be filtered inside block comments
         let content =
             "let x = 1;\n/*\nThis line has no star prefix\nNeither does this one\n*/\nlet y = 2;";
         let lines: Vec<_> = non_comment_lines(content);
@@ -289,6 +292,44 @@ mod tests {
         assert_eq!(Severity::from_linter_str("unknown"), Severity::Low);
     }
 
+    // --- Known limitations ---
+
+    #[test]
+    fn known_limitation_block_comment_in_string_literal() {
+        let content = "let x = '/* not a comment */';\nreal code;";
+        let lines: Vec<_> = non_comment_lines(content);
+        // `/*` inside string opens block comment; `*/` closes it on same line.
+        assert_eq!(
+            lines,
+            vec![(1, "let x = '/* not a comment */';"), (2, "real code;")]
+        );
+    }
+
+    #[test]
+    fn known_limitation_block_comment_in_string_spans_lines() {
+        let content = "let x = '/*';\nreal code;\nlet y = '*/';\nmore code;";
+        let lines: Vec<_> = non_comment_lines(content);
+        // `/*` in string opens block; lines 2-3 treated as inside block comment.
+        assert_eq!(
+            lines,
+            vec![
+                (1, "let x = '/*';"),
+                (3, "let y = '*/';"),
+                (4, "more code;")
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_block_comment_with_code_on_both_sides() {
+        let content = "let x = 1; /* inline */ let y = 2;";
+        let lines: Vec<_> = non_comment_lines(content);
+        // Code exists on both sides of inline block comment — line should be included.
+        assert_eq!(lines, vec![(1, "let x = 1; /* inline */ let y = 2;")]);
+    }
+
+    // --- load_rules ---
+
     #[test]
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
@@ -298,10 +339,11 @@ mod tests {
 
     #[test]
     fn load_rules_respects_disabled_rule() {
+        let all_count = load_rules(&Config::default()).len();
         let mut config = Config::default();
         config.rules.eval = false;
         config.rules.security = false;
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 17);
+        assert_eq!(rules.len(), all_count - 2);
     }
 }
