@@ -188,3 +188,41 @@ jobs:
           git diff --staged --quiet && echo "No changes to commit" && exit 0
           git commit -m "feat: update guardrails to v${VERSION}"
           git push
+
+  update-sentinels:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: update-sentinels
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout sentinels
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: thkt/sentinels
+          token: ${{ secrets.SENTINELS_TOKEN }}
+
+      - name: Update plugin version
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          TOOL: guardrails
+        run: |
+          cd "${TOOL}/.claude-plugin"
+          jq --arg v "$VERSION" '.version = $v' plugin.json > tmp.json
+          mv tmp.json plugin.json
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          TOOL: guardrails
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${TOOL}/.claude-plugin/plugin.json"
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+          git commit -m "sync: ${TOOL} v${VERSION}"
+          git push
