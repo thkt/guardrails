@@ -56,7 +56,15 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
                 .collect::<Vec<_>>()
                 .join("\n")
         }
-        _ => return None,
+        _ => {
+            if input.tool_input.content.is_some() || input.tool_input.new_string.is_some() {
+                eprintln!(
+                    "guardrails: unknown tool '{}' has content fields — add to get_file_and_content if it writes files",
+                    input.tool_name
+                );
+            }
+            return None;
+        }
     };
 
     if file_path.is_empty() || content.is_empty() {
@@ -75,8 +83,10 @@ fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Vi
         let mut linted = false;
         if config.rules.oxlint {
             if let Some(bin) = oxlint::resolve(file_path) {
-                violations.extend(oxlint::check(content, file_path, &bin));
-                linted = true;
+                if let Some(results) = oxlint::check(content, file_path, &bin) {
+                    violations.extend(results);
+                    linted = true;
+                }
             }
         }
         if !linted && config.rules.biome {
@@ -95,13 +105,15 @@ fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Vi
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    // Parse once, visit many: all AST-based rules share a single parse.
     let has_ast_rules = config.rules.ast_security || config.rules.no_use_effect;
     if is_js && has_ast_rules {
         let ast_violations =
             ast::with_parsed_program(content, file_path, |program, line_offsets| {
                 let mut found = Vec::new();
                 if config.rules.ast_security {
+                    if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
+                        found.push(v);
+                    }
                     found.extend(ast_security::check_program(
                         program,
                         line_offsets,

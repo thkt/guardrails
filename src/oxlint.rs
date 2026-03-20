@@ -35,36 +35,27 @@ pub fn resolve(file_path: &str) -> Option<PathBuf> {
     crate::resolve::try_resolve_bin("oxlint", file_path)
 }
 
-/// Fail-open: returns empty violations on any error.
-pub fn check(content: &str, file_path: &str, bin: &Path) -> Vec<Violation> {
-    let temp_file = match write_temp(content, file_path, "oxlint") {
-        Some(f) => f,
-        None => return vec![],
-    };
+pub fn check(content: &str, file_path: &str, bin: &Path) -> Option<Vec<Violation>> {
+    let temp_file = write_temp(content, file_path, "oxlint")?;
 
     let temp_path_str = match temp_file.path().to_str() {
         Some(s) => s,
         None => {
             eprintln!("guardrails: oxlint: temp path contains non-UTF8 characters");
-            return vec![];
+            return None;
         }
     };
 
-    let output = match run_with_timeout(
+    let output = run_with_timeout(
         Command::new(bin).args(["--format", "json", temp_path_str]),
         "oxlint",
-    ) {
-        Some(o) => o,
-        None => return vec![],
-    };
+    )?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    match parse_linter_json::<OxlintOutput>(&stdout, &stderr, "oxlint") {
-        Some(o) => convert_diagnostics(o, file_path),
-        None => vec![],
-    }
+    parse_linter_json::<OxlintOutput>(&stdout, &stderr, "oxlint")
+        .map(|o| convert_diagnostics(o, file_path))
 }
 
 fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> {

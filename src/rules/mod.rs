@@ -48,6 +48,9 @@ pub(crate) mod rule_id {
     pub const CHILD_PROCESS_INJECTION: &str = "child-process-injection";
     pub const NO_USE_EFFECT: &str = "no-use-effect";
     pub const NON_LITERAL_FS_PATH: &str = "non-literal-fs-path";
+    pub const BIDI_CHARACTERS: &str = "bidi-characters";
+    pub const UNSAFE_REGEX: &str = "unsafe-regex";
+    pub const NON_LITERAL_REQUIRE: &str = "non-literal-require";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
