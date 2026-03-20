@@ -1,3 +1,4 @@
+mod ast;
 mod ast_security;
 mod biome;
 mod config;
@@ -94,8 +95,31 @@ fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Vi
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    if is_js && config.rules.ast_security {
-        violations.extend(ast_security::check(content, file_path));
+    // Parse once, visit many: all AST-based rules share a single parse.
+    let has_ast_rules = config.rules.ast_security || config.rules.no_use_effect;
+    if is_js && has_ast_rules {
+        let ast_violations =
+            ast::with_parsed_program(content, file_path, |program, line_offsets| {
+                let mut found = Vec::new();
+                if config.rules.ast_security {
+                    found.extend(ast_security::check_program(
+                        program,
+                        line_offsets,
+                        file_path,
+                    ));
+                }
+                if config.rules.no_use_effect {
+                    found.extend(rules::no_use_effect::check_program(
+                        program,
+                        line_offsets,
+                        file_path,
+                    ));
+                }
+                found
+            });
+        if let Some(v) = ast_violations {
+            violations.extend(v);
+        }
     }
 
     violations
@@ -123,13 +147,13 @@ fn main() {
         }
     };
 
-    // Fail-open on truncation: oversized input cannot be reliably checked.
+    // Fail-closed on truncation: oversized input cannot be reliably checked.
     if bytes_read as u64 > MAX_INPUT_SIZE {
         eprintln!(
-            "guardrails: input too large (>{} bytes), skipping",
+            "guardrails: input too large (>{} bytes), blocking as precaution",
             MAX_INPUT_SIZE
         );
-        std::process::exit(0);
+        std::process::exit(2);
     }
 
     let input: ToolInput = match serde_json::from_str(&input_str) {
@@ -368,6 +392,29 @@ mod tests {
         assert!(!violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
+    }
+
+    #[test]
+    fn collect_violations_no_use_effect_detects_in_tsx() {
+        let config = Config::default();
+        let violations = collect_violations(
+            "/src/App.tsx",
+            "useEffect(() => { fetchData(); }, []);",
+            &config,
+        );
+        assert!(violations.iter().any(|v| v.rule == "no-use-effect"));
+    }
+
+    #[test]
+    fn collect_violations_no_use_effect_disabled() {
+        let mut config = Config::default();
+        config.rules.no_use_effect = false;
+        let violations = collect_violations(
+            "/src/App.tsx",
+            "useEffect(() => { fetchData(); }, []);",
+            &config,
+        );
+        assert!(!violations.iter().any(|v| v.rule == "no-use-effect"));
     }
 
     // --- partition_violations ---

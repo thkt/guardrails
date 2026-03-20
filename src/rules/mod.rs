@@ -8,6 +8,7 @@ mod generated_file;
 mod hardcoded_secrets;
 mod http_resource;
 mod naming;
+pub(crate) mod no_use_effect;
 mod open_redirect;
 mod raw_html;
 mod security;
@@ -45,6 +46,7 @@ pub(crate) mod rule_id {
     pub const OPEN_REDIRECT: &str = "open-redirect";
     pub const ERR_STACK_EXPOSURE: &str = "err-stack-exposure";
     pub const CHILD_PROCESS_INJECTION: &str = "child-process-injection";
+    pub const NO_USE_EFFECT: &str = "no-use-effect";
     pub const NON_LITERAL_FS_PATH: &str = "non-literal-fs-path";
 }
 
@@ -57,8 +59,10 @@ pub static RE_TEST_FILE: LazyLock<Regex> =
 pub static RE_ALL_FILES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
 
-/// JSDoc: matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
-#[inline]
+pub static RE_REACT_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
+
+/// Matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
 fn is_line_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"

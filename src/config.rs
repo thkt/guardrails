@@ -47,6 +47,7 @@ define_rule_config! {
     test_assertion    => "testAssertion",
     flaky_test        => "flakyTest",
     sensitive_logging => "sensitiveLogging",
+    no_use_effect     => "noUseEffect",
     biome             => "biome",
     oxlint            => "oxlint",
     eval              => "eval",
@@ -115,24 +116,35 @@ impl Config {
         };
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
-        if tools_path.exists() {
-            let content = fs::read_to_string(&tools_path)
-                .map_err(|e| format!("cannot read config {:?}: {}", tools_path, e))?;
-            let tools: ToolsConfig = serde_json::from_str(&content)
-                .map_err(|e| format!("invalid config {:?}: {}", tools_path, e))?;
-            if let Some(project) = tools.guardrails {
-                return Ok(self.merge(project));
+        match fs::read_to_string(&tools_path) {
+            Ok(content) => {
+                let tools: ToolsConfig = serde_json::from_str(&content)
+                    .map_err(|e| format!("invalid config {:?}: {}", tools_path, e))?;
+                if let Some(project) = tools.guardrails {
+                    return Ok(self.merge(project));
+                }
+                return Ok(self);
             }
-            return Ok(self);
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("cannot read config {:?}: {}", tools_path, e));
+            }
+            Err(_) => {}
         }
 
         let legacy_path = git_root.join(LEGACY_CONFIG_FILE);
-        if legacy_path.exists() {
-            let content = fs::read_to_string(&legacy_path)
-                .map_err(|e| format!("cannot read project config {:?}: {}", legacy_path, e))?;
-            let project: ProjectConfig = serde_json::from_str(&content)
-                .map_err(|e| format!("invalid project config {:?}: {}", legacy_path, e))?;
-            return Ok(self.merge(project));
+        match fs::read_to_string(&legacy_path) {
+            Ok(content) => {
+                let project: ProjectConfig = serde_json::from_str(&content)
+                    .map_err(|e| format!("invalid project config {:?}: {}", legacy_path, e))?;
+                return Ok(self.merge(project));
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!(
+                    "cannot read project config {:?}: {}",
+                    legacy_path, e
+                ));
+            }
+            Err(_) => {}
         }
 
         Ok(self)
@@ -320,7 +332,6 @@ mod tests {
         let config = Config::default()
             .with_project_overrides(file_path.to_str().unwrap())
             .unwrap();
-        // tools.json wins: biome=false, oxlint stays default (true)
         assert!(!config.rules.biome);
         assert!(config.rules.oxlint);
     }
@@ -378,7 +389,30 @@ mod tests {
         let config = Config::default()
             .with_project_overrides(file_path.to_str().unwrap())
             .unwrap();
-        // guardrails key absent → defaults unchanged
+        assert!(config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn with_project_overrides_tools_json_without_guardrails_ignores_legacy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"reviews": {"some": "config"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join(LEGACY_CONFIG_FILE),
+            r#"{"rules": {"biome": false}}"#,
+        )
+        .unwrap();
+
+        let file_path = tmp.path().join("src/app.ts");
+        let config = Config::default()
+            .with_project_overrides(file_path.to_str().unwrap())
+            .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
     }

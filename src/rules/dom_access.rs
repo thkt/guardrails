@@ -1,9 +1,6 @@
-use super::{find_match_in_lines, Rule, Severity, Violation};
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_REACT_FILE};
 use regex::Regex;
 use std::sync::LazyLock;
-
-static RE_REACT_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
 
 struct DomAccess {
     pattern: &'static LazyLock<Regex>,

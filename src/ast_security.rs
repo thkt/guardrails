@@ -1,42 +1,29 @@
+use crate::ast;
 use crate::rules::{rule_id, Severity, Violation};
-use crate::scanner;
-use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
-use oxc_parser::Parser;
-use oxc_span::SourceType;
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 
-/// Returns empty Vec on parse failure (fail-open).
-pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    let Ok(source_type) = SourceType::from_path(file_path) else {
-        eprintln!("guardrails: ast_security: unsupported file type: {file_path}");
-        return Vec::new();
-    };
+#[cfg(test)]
+fn check(content: &str, file_path: &str) -> Vec<Violation> {
+    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+        check_program(program, line_offsets, file_path)
+    })
+    .unwrap_or_default()
+}
 
-    let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, content, source_type).parse();
-
-    if ret.panicked {
-        eprintln!("guardrails: ast_security: parser panicked on {file_path}");
-        return Vec::new();
-    }
-
-    if !ret.errors.is_empty() {
-        eprintln!(
-            "guardrails: ast_security: {} parse error(s) in {file_path}, proceeding with partial AST",
-            ret.errors.len(),
-        );
-    }
-
-    let line_offsets = scanner::build_line_offsets(content);
+pub fn check_program(
+    program: &Program<'_>,
+    line_offsets: &[usize],
+    file_path: &str,
+) -> Vec<Violation> {
     let mut visitor = SecurityVisitor {
         violations: Vec::new(),
         file_path,
-        line_offsets: &line_offsets,
+        line_offsets,
     };
-    visitor.visit_program(&ret.program);
+    visitor.visit_program(program);
     visitor.violations
 }
 
@@ -48,7 +35,7 @@ struct SecurityVisitor<'s> {
 
 impl SecurityVisitor<'_> {
     fn span_to_line(&self, span: Span) -> u32 {
-        scanner::offset_to_line(self.line_offsets, span.start as usize) as u32
+        ast::span_to_line(self.line_offsets, span)
     }
 
     fn push_violation(&mut self, rule: &str, severity: Severity, fix: &str, span: Span) {
@@ -145,7 +132,6 @@ fn is_ident(expr: &Expression, name: &str) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == name)
 }
 
-/// Check if callee is res.json/res.send/res.status().json
 fn is_response_call(callee: &Expression) -> bool {
     let (object, method) = match callee {
         Expression::StaticMemberExpression(sme) => (&sme.object, sme.property.name.as_str()),
@@ -244,58 +230,31 @@ mod tests {
         check(code, "/src/app.ts")
     }
 
-    // --- err-stack-exposure ---
-
     #[test]
-    fn t001_res_json_with_stack() {
-        let v = check_js("res.json({ stack: err.stack });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+    fn err_stack_callee_variants() {
+        for code in [
+            "res.json({ stack: err.stack });",
+            "res.status(500).json({ stack: error.stack });",
+            "res.send({ stack: err.stack });",
+            "response.json({ stack: err.stack });",
+            "response.status(500).json({ error: err.stack });",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(v[0].severity, Severity::High, "failed for: {code}");
+            assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE, "failed for: {code}");
+        }
     }
 
     #[test]
-    fn t002_res_status_json_with_stack() {
-        let v = check_js("res.status(500).json({ stack: error.stack });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-    }
-
-    #[test]
-    fn t003_logger_with_stack_safe() {
+    fn non_response_callee_with_stack_safe() {
         assert!(check_js("logger.error({ stack: err.stack });").is_empty());
-    }
-
-    #[test]
-    fn t004_console_with_stack_safe() {
         assert!(check_js("console.error(err.stack);").is_empty());
     }
 
     #[test]
-    fn t005_res_json_no_stack() {
+    fn res_json_without_stack_safe() {
         assert!(check_js("res.json({ error: err.message });").is_empty());
-    }
-
-    #[test]
-    fn res_send_with_stack() {
-        let v = check_js("res.send({ stack: err.stack });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-    }
-
-    #[test]
-    fn response_json_with_stack() {
-        let v = check_js("response.json({ stack: err.stack });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-    }
-
-    #[test]
-    fn response_status_json_with_stack() {
-        let v = check_js("response.status(500).json({ error: err.stack });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
     #[test]
@@ -326,124 +285,65 @@ mod tests {
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
-    // --- child-process-injection ---
-
     #[test]
-    fn t006_exec_variable() {
-        let v = check_js("exec(userInput);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
+    fn child_process_dynamic_arg_blocked() {
+        for code in [
+            "exec(userInput);",
+            "execSync(cmd);",
+            "spawn(variable, args);",
+            "spawnSync(cmd, args);",
+            "exec(`ls ${dir}`);",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(v[0].severity, Severity::High, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::CHILD_PROCESS_INJECTION,
+                "failed for: {code}"
+            );
+        }
     }
 
     #[test]
-    fn t007_exec_sync_variable() {
-        let v = check_js("execSync(cmd);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
-    }
-
-    #[test]
-    fn t008_spawn_variable() {
-        let v = check_js("spawn(variable, args);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
-    }
-
-    #[test]
-    fn t009_exec_literal_safe() {
+    fn child_process_literal_safe() {
         assert!(check_js("exec('ls -la');").is_empty());
-    }
-
-    #[test]
-    fn t010_exec_template_literal_blocked() {
-        let v = check_js("exec(`ls ${dir}`);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
-    }
-
-    #[test]
-    fn spawn_sync_variable() {
-        let v = check_js("spawnSync(cmd, args);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
-    }
-
-    #[test]
-    fn exec_static_template_safe() {
         assert!(check_js("exec(`ls -la`);").is_empty());
-    }
-
-    #[test]
-    fn t011_exec_file_literal_safe() {
         assert!(check_js("execFile('/usr/bin/git', args);").is_empty());
     }
 
-    // --- non-literal-fs-path ---
-
     #[test]
-    fn t012_fs_read_variable() {
+    fn fs_dynamic_path_blocked() {
+        for code in [
+            "fs.readFile(userInput, cb);",
+            "fs.writeFileSync(variable, data);",
+            "fs.readFileSync(path.join(__dirname, f));",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::NON_LITERAL_FS_PATH,
+                "failed for: {code}"
+            );
+        }
         let v = check_js("fs.readFile(userInput, cb);");
-        assert_eq!(v.len(), 1);
         assert_eq!(v[0].severity, Severity::Medium);
-        assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
     }
 
     #[test]
-    fn t013_fs_write_sync_variable() {
-        let v = check_js("fs.writeFileSync(variable, data);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
-    }
-
-    #[test]
-    fn t014_fs_read_literal_safe() {
+    fn fs_static_path_safe() {
         assert!(check_js("fs.readFile('./config.json', cb);").is_empty());
-    }
-
-    #[test]
-    fn t015_fs_read_dirname_concat_safe() {
         assert!(check_js("fs.readFile(__dirname + '/file', cb);").is_empty());
-    }
-
-    #[test]
-    fn fs_read_filename_safe() {
         assert!(check_js("fs.readFile(__filename, cb);").is_empty());
-    }
-
-    #[test]
-    fn fs_read_chained_concat_safe() {
         assert!(check_js("fs.readFile(__dirname + '/sub' + '/file', cb);").is_empty());
-    }
-
-    #[test]
-    fn fs_read_static_template_safe() {
         assert!(check_js("fs.readFile(`./config.json`, cb);").is_empty());
     }
 
     #[test]
-    fn t016_fs_read_path_join_variable() {
-        let v = check_js("fs.readFileSync(path.join(__dirname, f));");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
-    }
-
-    // --- fail-open / edge cases ---
-
-    #[test]
-    fn t017_invalid_syntax_fail_open() {
+    fn fail_open_on_invalid_or_unsupported_input() {
         assert!(check_js("function { invalid syntax !!!").is_empty());
-    }
-
-    #[test]
-    fn t018_empty_file() {
         assert!(check_js("").is_empty());
-    }
-
-    #[test]
-    fn t019_css_file_skipped() {
         assert!(check("body { color: red; }", "/src/styles.css").is_empty());
     }
 
@@ -487,45 +387,38 @@ function loadFile(filePath) {
         );
     }
 
-    // --- ComputedMemberExpression ---
-
     #[test]
-    fn computed_member_exec_blocked() {
-        let v = check_js(r#"cp["exec"](userInput);"#);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
-    }
-
-    #[test]
-    fn computed_member_exec_literal_safe() {
+    fn member_expression_callee_variants() {
+        for (code, rule) in [
+            (
+                r#"cp["exec"](userInput);"#,
+                rule_id::CHILD_PROCESS_INJECTION,
+            ),
+            ("cp.exec(userInput);", rule_id::CHILD_PROCESS_INJECTION),
+            ("childProcess.spawn(cmd);", rule_id::CHILD_PROCESS_INJECTION),
+            (
+                r#"fs["readFile"](userInput, cb);"#,
+                rule_id::NON_LITERAL_FS_PATH,
+            ),
+            (
+                r#"res["json"]({ stack: err.stack });"#,
+                rule_id::ERR_STACK_EXPOSURE,
+            ),
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(v[0].rule, rule, "failed for: {code}");
+        }
         assert!(check_js(r#"cp["exec"]("ls -la");"#).is_empty());
+        assert!(check_js("cp.exec('ls -la');").is_empty());
     }
 
     #[test]
-    fn computed_member_fs_blocked() {
-        let v = check_js(r#"fs["readFile"](userInput, cb);"#);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
-    }
-
-    #[test]
-    fn computed_member_res_json_stack() {
-        let v = check_js(r#"res["json"]({ stack: err.stack });"#);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-    }
-
-    // --- Boundary conditions ---
-
-    #[test]
-    fn fs_dirname_plus_variable_blocked() {
+    fn fs_boundary_conditions() {
         let v = check_js("fs.readFile(__dirname + userInput, cb);");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
-    }
 
-    #[test]
-    fn fs_unlink_variable_blocked() {
         let v = check_js("fs.unlink(variable, cb);");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
@@ -538,20 +431,16 @@ function loadFile(filePath) {
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
-    // --- Known limitations ---
-
     #[test]
-    fn known_limitation_spread_err_not_detected() {
+    fn known_limitations_not_detected() {
         assert!(check_js("res.json({ ...err });").is_empty());
-    }
-
-    #[test]
-    fn known_limitation_aliased_fs_not_detected() {
         assert!(check_js("fileSystem.readFile(userInput, cb);").is_empty());
+        assert!(check_js("require('fs').readFile(userInput, cb);").is_empty());
     }
 
     #[test]
-    fn known_limitation_require_fs_not_detected() {
-        assert!(check_js("require('fs').readFile(userInput, cb);").is_empty());
+    fn zero_arg_calls_safe() {
+        assert!(check_js("res.json();").is_empty());
+        assert!(check_js("exec();").is_empty());
     }
 }
