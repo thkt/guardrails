@@ -127,6 +127,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits                                  | No code generation in project                    |
 | `testLocation`     | Medium   | Test files in src/ directory                                             | Co-located test strategy (tests next to source)  |
 | `naming`           | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project     |
+| `noUseEffect`      | Medium   | Flags useEffect in .tsx/.jsx with alternative suggestions                | Projects using useEffect intentionally           |
 | `astSecurity`      | Mixed    | AST-based: command injection, stack exposure, path traversal (see below) | Non-Node.js projects                             |
 
 ### AST Security Rules (`astSecurity`)
@@ -185,6 +186,7 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
       "testLocation": true,
       "naming": true,
       "flakyTest": true,
+      "noUseEffect": true,
       "astSecurity": true
     },
     "severity": {
