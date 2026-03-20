@@ -19,7 +19,7 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 Installs the binary and registers the hook automatically:
 
 ```bash
-claude plugins marketplace add github:thkt/guardrails
+claude plugins marketplace add thkt/sentinels
 claude plugins install guardrails
 ```
 
