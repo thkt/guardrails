@@ -121,6 +121,7 @@ dependencies = [
 name = "guardrails"
 version = "0.11.0"
 dependencies = [
+ "libc",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",

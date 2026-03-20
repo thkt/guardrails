@@ -1,3 +1,6 @@
+use crate::parse_json::parse_linter_json;
+use crate::tempfile_util::write_temp;
+use serde::de::DeserializeOwned;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -6,7 +9,55 @@ use std::time::Duration;
 
 const LINTER_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn run_with_timeout(cmd: &mut Command, tool: &str) -> Option<Output> {
+fn spawn_pipe_reader(
+    pipe: impl Read + Send + 'static,
+    tool: &'static str,
+    label: &'static str,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut pipe = pipe;
+        let mut buf = Vec::new();
+        if let Err(e) = pipe.read_to_end(&mut buf) {
+            eprintln!("guardrails: {tool}: {label} read error: {e}");
+        }
+        buf
+    })
+}
+
+fn wait_with_timeout(
+    child: std::process::Child,
+    tool: &'static str,
+) -> Option<std::process::ExitStatus> {
+    let child_pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = tx.send(child.wait());
+    });
+
+    match rx.recv_timeout(LINTER_TIMEOUT) {
+        Ok(Ok(s)) => Some(s),
+        Ok(Err(e)) => {
+            eprintln!("guardrails: {}: process error: {}", tool, e);
+            None
+        }
+        Err(_) => {
+            eprintln!(
+                "guardrails: {}: timed out after {}s, skipping",
+                tool,
+                LINTER_TIMEOUT.as_secs()
+            );
+            // SAFETY: child_pid is from child.id() (valid PID).
+            // Direct syscall avoids spawning a subprocess for kill.
+            unsafe {
+                libc::kill(child_pid as i32, libc::SIGKILL);
+            }
+            None
+        }
+    }
+}
+
+pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output> {
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -15,75 +66,61 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &str) -> Option<Output> {
         }
     };
 
-    let child_pid = child.id();
+    let out_t = spawn_pipe_reader(child.stdout.take()?, tool, "stdout");
+    let err_t = spawn_pipe_reader(child.stderr.take()?, tool, "stderr");
 
-    let mut stdout = child.stdout.take()?;
-    let mut stderr = child.stderr.take()?;
-    let out_t = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
-    let err_t = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
-        buf
-    });
+    let status = wait_with_timeout(child, tool);
 
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait());
+    let stdout = out_t.join().unwrap_or_else(|_| {
+        eprintln!("guardrails: {tool}: stdout reader thread panicked");
+        Vec::new()
+    });
+    let stderr = err_t.join().unwrap_or_else(|_| {
+        eprintln!("guardrails: {tool}: stderr reader thread panicked");
+        Vec::new()
     });
 
-    let status = match rx.recv_timeout(LINTER_TIMEOUT) {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            eprintln!("guardrails: {}: process error: {}", tool, e);
-            return None;
-        }
-        Err(_) => {
-            eprintln!(
-                "guardrails: {}: timed out after {}s, skipping",
-                tool,
-                LINTER_TIMEOUT.as_secs()
-            );
-            let _ = Command::new("kill")
-                .args(["-9", &child_pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            return None;
-        }
-    };
-
-    Some(Output {
-        status,
-        stdout: out_t.join().unwrap_or_else(|_| {
-            eprintln!("guardrails: {tool}: stdout reader thread panicked");
-            Vec::new()
-        }),
-        stderr: err_t.join().unwrap_or_else(|_| {
-            eprintln!("guardrails: {tool}: stderr reader thread panicked");
-            Vec::new()
-        }),
+    status.map(|s| Output {
+        status: s,
+        stdout,
+        stderr,
     })
 }
 
-/// Resolves a tool binary, checking node_modules first, then PATH.
 pub fn try_resolve_bin(name: &str, file_path: &str) -> Option<PathBuf> {
-    let mut dir = Path::new(file_path).parent();
-    while let Some(d) = dir {
-        let candidate = d.join("node_modules/.bin").join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        dir = d.parent();
-    }
-    std::env::var("PATH").ok().and_then(|path_var| {
-        std::env::split_paths(&path_var)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.exists())
-    })
+    Path::new(file_path)
+        .ancestors()
+        .skip(1) // skip the file itself, start from parent dir
+        .map(|d| d.join("node_modules/.bin").join(name))
+        .find(|c| c.exists())
+        .or_else(|| {
+            std::env::var("PATH").ok().and_then(|path_var| {
+                std::env::split_paths(&path_var)
+                    .map(|dir| dir.join(name))
+                    .find(|candidate| candidate.exists())
+            })
+        })
+}
+
+pub fn run_linter_check<T: DeserializeOwned>(
+    content: &str,
+    file_path: &str,
+    bin: &Path,
+    args: &[&str],
+    tool: &'static str,
+) -> Option<T> {
+    let temp_file = write_temp(content, file_path, tool)?;
+    let temp_path_str = temp_file.path().to_str().or_else(|| {
+        eprintln!("guardrails: {tool}: temp path contains non-UTF8 characters");
+        None
+    })?;
+
+    let output = run_with_timeout(Command::new(bin).args(args).arg(temp_path_str), tool)?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    parse_linter_json::<T>(&stdout, &stderr, tool)
 }
 
 #[cfg(test)]
@@ -91,6 +128,41 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn run_with_timeout_captures_stdout() {
+        let output = run_with_timeout(&mut Command::new("echo").arg("hello"), "test-echo").unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("hello"),
+            "expected 'hello' in stdout, got: {:?}",
+            stdout
+        );
+    }
+
+    #[test]
+    fn run_with_timeout_captures_stderr() {
+        let output = run_with_timeout(
+            &mut Command::new("sh").args(["-c", "echo err >&2"]),
+            "test-stderr",
+        )
+        .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("err"),
+            "expected 'err' in stderr, got: {:?}",
+            stderr
+        );
+    }
+
+    #[test]
+    fn run_with_timeout_returns_none_on_spawn_failure() {
+        let result = run_with_timeout(
+            &mut Command::new("nonexistent_binary_xyz_12345"),
+            "test-missing",
+        );
+        assert!(result.is_none());
+    }
 
     #[test]
     fn finds_bin_in_direct_parent_node_modules() {
@@ -134,12 +206,10 @@ mod tests {
     fn prefers_closest_node_modules() {
         let tmp = TempDir::new().unwrap();
 
-        // root node_modules
         let root_bin = tmp.path().join("node_modules/.bin");
         fs::create_dir_all(&root_bin).unwrap();
         fs::write(root_bin.join("oxlint"), "root").unwrap();
 
-        // nested packages/app/node_modules (monorepo)
         let nested_bin = tmp.path().join("packages/app/node_modules/.bin");
         fs::create_dir_all(&nested_bin).unwrap();
         fs::write(nested_bin.join("oxlint"), "nested").unwrap();

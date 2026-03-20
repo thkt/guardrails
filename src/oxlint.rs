@@ -1,10 +1,7 @@
-use crate::parse_json::parse_linter_json;
-use crate::resolve::run_with_timeout;
+use crate::resolve::run_linter_check;
 use crate::rules::{Severity, Violation};
-use crate::tempfile_util::write_temp;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Deserialize)]
 struct OxlintOutput {
@@ -36,26 +33,9 @@ pub fn resolve(file_path: &str) -> Option<PathBuf> {
 }
 
 pub fn check(content: &str, file_path: &str, bin: &Path) -> Option<Vec<Violation>> {
-    let temp_file = write_temp(content, file_path, "oxlint")?;
-
-    let temp_path_str = match temp_file.path().to_str() {
-        Some(s) => s,
-        None => {
-            eprintln!("guardrails: oxlint: temp path contains non-UTF8 characters");
-            return None;
-        }
-    };
-
-    let output = run_with_timeout(
-        Command::new(bin).args(["--format", "json", temp_path_str]),
-        "oxlint",
-    )?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    parse_linter_json::<OxlintOutput>(&stdout, &stderr, "oxlint")
-        .map(|o| convert_diagnostics(o, file_path))
+    let output: OxlintOutput =
+        run_linter_check(content, file_path, bin, &["--format", "json"], "oxlint")?;
+    Some(convert_diagnostics(output, file_path))
 }
 
 fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> {

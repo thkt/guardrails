@@ -1,8 +1,11 @@
 use crate::rules::Severity;
 use serde::Deserialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+/// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
+/// `Default` impl (all rules enabled), and `apply_overrides` (partial merge).
+/// Add a new rule by appending `field_name => "camelCaseName"` to the invocation.
 macro_rules! define_rule_config {
     ($( $field:ident => $serde_name:literal ),* $(,)?) => {
         #[derive(Debug, Clone)]
@@ -110,8 +113,16 @@ struct ToolsConfig {
 }
 
 impl Config {
-    pub fn with_project_overrides(self, file_path: &str) -> Result<Self, String> {
-        let Some(git_root) = Self::find_git_root(file_path) else {
+    // Uses CWD (not file_path) as trust boundary to prevent
+    // LLM-controlled paths from influencing config discovery.
+    pub fn with_project_overrides(self) -> Result<Self, String> {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("cannot determine working directory: {}", e))?;
+        self.with_overrides_from_root(&cwd)
+    }
+
+    fn with_overrides_from_root(self, start: &std::path::Path) -> Result<Self, String> {
+        let Some(git_root) = Self::find_git_root(start) else {
             return Ok(self);
         };
 
@@ -165,15 +176,11 @@ impl Config {
         self
     }
 
-    fn find_git_root(file_path: &str) -> Option<PathBuf> {
-        let mut dir = std::path::Path::new(file_path).parent();
-        while let Some(d) = dir {
-            if d.join(".git").exists() {
-                return Some(d.to_path_buf());
-            }
-            dir = d.parent();
-        }
-        None
+    fn find_git_root(start: &std::path::Path) -> Option<PathBuf> {
+        start
+            .ancestors()
+            .find(|d| d.join(".git").exists())
+            .map(Path::to_path_buf)
     }
 }
 
@@ -201,22 +208,29 @@ mod tests {
     }
 
     #[test]
-    fn find_git_root_from_deep_path() {
+    fn find_git_root_from_project_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        let result = Config::find_git_root(tmp.path());
+        assert_eq!(result, Some(tmp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn find_git_root_from_deep_subdir() {
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir(tmp.path().join(".git")).unwrap();
         let deep = tmp.path().join("src/components");
         fs::create_dir_all(&deep).unwrap();
 
-        let file_path = deep.join("Button.tsx");
-        let result = Config::find_git_root(file_path.to_str().unwrap());
+        let result = Config::find_git_root(&deep);
         assert_eq!(result, Some(tmp.path().to_path_buf()));
     }
 
     #[test]
     fn find_git_root_none_without_git() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let file_path = tmp.path().join("src/app.ts");
-        assert_eq!(Config::find_git_root(file_path.to_str().unwrap()), None);
+        assert_eq!(Config::find_git_root(tmp.path()), None);
     }
 
     #[test]
@@ -286,9 +300,8 @@ mod tests {
         )
         .unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(!config.rules.biome);
         assert!(config.rules.oxlint);
@@ -304,9 +317,8 @@ mod tests {
         )
         .unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(!config.rules.biome);
         assert!(config.rules.oxlint);
@@ -328,9 +340,8 @@ mod tests {
         )
         .unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(!config.rules.biome);
         assert!(config.rules.oxlint);
@@ -341,9 +352,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir(tmp.path().join(".git")).unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
@@ -356,8 +366,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".claude")).unwrap();
         fs::write(tmp.path().join(TOOLS_CONFIG_FILE), "not valid json{{{").unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
-        let result = Config::default().with_project_overrides(file_path.to_str().unwrap());
+        let result = Config::default().with_overrides_from_root(tmp.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid config"));
     }
@@ -368,8 +377,7 @@ mod tests {
         fs::create_dir(tmp.path().join(".git")).unwrap();
         fs::write(tmp.path().join(LEGACY_CONFIG_FILE), "not valid json{{{").unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
-        let result = Config::default().with_project_overrides(file_path.to_str().unwrap());
+        let result = Config::default().with_overrides_from_root(tmp.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid project config"));
     }
@@ -385,9 +393,8 @@ mod tests {
         )
         .unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
@@ -409,9 +416,8 @@ mod tests {
         )
         .unwrap();
 
-        let file_path = tmp.path().join("src/app.ts");
         let config = Config::default()
-            .with_project_overrides(file_path.to_str().unwrap())
+            .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);

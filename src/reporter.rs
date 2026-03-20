@@ -1,4 +1,8 @@
+use crate::color;
 use crate::rules::Violation;
+
+const HEADER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+const FOOTER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
 fn format_rule_name(rule: &str) -> (String, &'static str) {
     if rule.starts_with("biome/") {
@@ -13,39 +17,39 @@ fn format_rule_name(rule: &str) -> (String, &'static str) {
     }
 }
 
+fn format_location(v: &Violation) -> String {
+    match v.line {
+        Some(l) => format!("{}:{}", v.file, l),
+        None => v.file.clone(),
+    }
+}
+
 pub fn format_violations(violations: &[&Violation]) -> String {
     if violations.is_empty() {
         return String::new();
     }
 
     let mut lines = vec![
-        format!(
-            "GUARDRAILS: {} issues blocked this operation",
-            violations.len()
-        ),
         String::new(),
+        color::bold_red(&format!("Guardrails {}", HEADER_SEPARATOR)),
     ];
 
-    for (i, v) in violations.iter().enumerate() {
+    for v in violations {
         let (rule_name, source) = format_rule_name(&v.rule);
-        let location = match v.line {
-            Some(l) => format!("{}:{}", v.file, l),
-            None => v.file.clone(),
-        };
-
-        lines.push(format!(
-            "[{}] {} ({}) [{}]",
-            i + 1,
-            rule_name,
-            source,
-            v.severity
-        ));
-        lines.push(format!("    location: {}", location));
+        lines.push(color::red(&format!(
+            "  ✗ {} ({}) [{}]",
+            rule_name, source, v.severity
+        )));
+        lines.push(format!("    {}", format_location(v)));
         lines.push(format!("    fix: {}", v.fix));
-        lines.push(String::new());
     }
 
-    lines.push("Fix the issues above and retry.".to_string());
+    lines.push(color::bold_red(FOOTER_SEPARATOR));
+    lines.push(color::bold_red(&format!(
+        "BLOCKED: Fix {} issue{} and retry.",
+        violations.len(),
+        if violations.len() == 1 { "" } else { "s" }
+    )));
 
     lines.join("\n")
 }
@@ -55,22 +59,26 @@ pub fn format_warnings(violations: &[&Violation]) -> String {
         return String::new();
     }
 
-    let mut lines = vec![format!("GUARDRAILS: {} warnings", violations.len())];
+    let mut lines = vec![
+        String::new(),
+        color::yellow(&format!(
+            "Guardrails ⚠ {} warning{}",
+            violations.len(),
+            if violations.len() == 1 { "" } else { "s" }
+        )),
+    ];
 
     for v in violations {
         let (rule_name, source) = format_rule_name(&v.rule);
-        let location = match v.line {
-            Some(l) => format!("{}:{}", v.file, l),
-            None => v.file.clone(),
-        };
         lines.push(format!(
             "  - {} ({}) [{}] at {}",
-            rule_name, source, v.severity, location
+            rule_name,
+            source,
+            v.severity,
+            format_location(v)
         ));
         lines.push(format!("    fix: {}", v.fix));
     }
-
-    lines.push(String::new());
 
     lines.join("\n")
 }
@@ -78,7 +86,18 @@ pub fn format_warnings(violations: &[&Violation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::strip_ansi;
     use crate::rules::Severity;
+
+    fn make_violation(rule: &str, severity: Severity, fix: &str) -> Violation {
+        Violation {
+            rule: rule.to_string(),
+            severity,
+            fix: fix.to_string(),
+            file: "/src/app.ts".to_string(),
+            line: Some(1),
+        }
+    }
 
     #[test]
     fn format_rule_name_biome() {
@@ -102,29 +121,39 @@ mod tests {
     }
 
     #[test]
-    fn format_violations_output() {
-        let v = Violation {
-            rule: "oxlint/eslint(no-debugger)".to_string(),
-            severity: Severity::High,
-            fix: "Remove debugger".to_string(),
-            file: "/src/app.ts".to_string(),
-            line: Some(5),
-        };
-        let output = format_violations(&[&v]);
-        assert!(output.contains("eslint(no-debugger) (oxlint) [HIGH]"));
-        assert!(output.contains("/src/app.ts:5"));
+    fn format_violations_single_issue() {
+        let v = make_violation(
+            "oxlint/eslint(no-debugger)",
+            Severity::High,
+            "Remove debugger",
+        );
+        let output = strip_ansi(&format_violations(&[&v]));
+        assert!(output.contains("Guardrails"), "missing header");
+        assert!(output.contains("━"), "missing separator");
+        assert!(output.contains("✗"), "missing cross mark");
+        assert!(
+            output.contains("eslint(no-debugger) (oxlint) [HIGH]"),
+            "missing rule/source/severity"
+        );
+        assert!(output.contains("/src/app.ts:1"), "missing location");
+        assert!(output.contains("fix: Remove debugger"), "missing fix");
+        assert!(output.contains("BLOCKED"), "missing blocked footer");
     }
 
     #[test]
-    fn format_warnings_output() {
-        let v = Violation {
-            rule: "biome/lint/style/useConst".to_string(),
-            severity: Severity::Low,
-            fix: "Use const".to_string(),
-            file: "/src/app.ts".to_string(),
-            line: Some(10),
-        };
-        let output = format_warnings(&[&v]);
+    fn format_violations_multiple_issues_count() {
+        let v1 = make_violation("eval", Severity::High, "fix1");
+        let v2 = make_violation("security", Severity::Critical, "fix2");
+        let output = strip_ansi(&format_violations(&[&v1, &v2]));
+        assert!(output.contains("2"));
+    }
+
+    #[test]
+    fn format_warnings_contains_warning_symbol() {
+        let v = make_violation("biome/lint/style/useConst", Severity::Low, "Use const");
+        let output = strip_ansi(&format_warnings(&[&v]));
+        assert!(output.contains("Guardrails"));
+        assert!(output.contains("⚠"));
         assert!(output.contains("useConst (biome) [LOW]"));
         assert!(output.contains("fix: Use const"));
     }

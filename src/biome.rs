@@ -1,11 +1,8 @@
-use crate::parse_json::parse_linter_json;
-use crate::resolve::run_with_timeout;
+use crate::resolve::run_linter_check;
 use crate::rules::{Severity, Violation};
 use crate::scanner::{build_line_offsets, offset_to_line};
-use crate::tempfile_util::write_temp;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Deserialize)]
 struct BiomeOutput {
@@ -50,36 +47,15 @@ pub fn resolve(file_path: &str) -> Option<PathBuf> {
     crate::resolve::try_resolve_bin("biome", file_path)
 }
 
-/// Fail-open: returns empty violations on any error.
-pub fn check(content: &str, file_path: &str, bin: &Path) -> Vec<Violation> {
-    let temp_file = match write_temp(content, file_path, "biome") {
-        Some(f) => f,
-        None => return vec![],
-    };
-
-    let temp_path_str = match temp_file.path().to_str() {
-        Some(s) => s,
-        None => {
-            eprintln!("guardrails: biome: temp path contains non-UTF8 characters");
-            return vec![];
-        }
-    };
-
-    let output = match run_with_timeout(
-        Command::new(bin).args(["lint", "--reporter=json", temp_path_str]),
+pub fn check(content: &str, file_path: &str, bin: &Path) -> Option<Vec<Violation>> {
+    let output: BiomeOutput = run_linter_check(
+        content,
+        file_path,
+        bin,
+        &["lint", "--reporter=json"],
         "biome",
-    ) {
-        Some(o) => o,
-        None => return vec![],
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    match parse_linter_json::<BiomeOutput>(&stdout, &stderr, "biome") {
-        Some(o) => convert_diagnostics(o, content, file_path),
-        None => vec![],
-    }
+    )?;
+    Some(convert_diagnostics(output, content, file_path))
 }
 
 fn convert_diagnostics(output: BiomeOutput, content: &str, file_path: &str) -> Vec<Violation> {
@@ -181,6 +157,49 @@ mod tests {
     #[test]
     fn get_fix_for_unknown_rule() {
         assert!(get_fix_for_rule("unknown/rule").is_none());
+    }
+
+    #[test]
+    fn convert_diagnostics_maps_fields() {
+        let content = "line1\nline2\nline3\n";
+        let output = BiomeOutput {
+            diagnostics: vec![BiomeDiagnostic {
+                category: "lint/suspicious/noExplicitAny".to_string(),
+                severity: "error".to_string(),
+                description: "Unexpected any".to_string(),
+                advices: BiomeAdvices { advices: vec![] },
+                location: BiomeLocation {
+                    span: Some(vec![6]), // offset 6 = line 2
+                },
+            }],
+        };
+        let violations = convert_diagnostics(output, content, "/src/app.ts");
+        assert_eq!(violations.len(), 1);
+        let v = &violations[0];
+        assert_eq!(v.rule, "biome/lint/suspicious/noExplicitAny");
+        assert_eq!(v.file, "/src/app.ts");
+        assert_eq!(v.line, Some(2));
+        assert_eq!(
+            v.fix,
+            "Use `unknown` with type guards, or define a specific type/interface"
+        );
+    }
+
+    #[test]
+    fn convert_diagnostics_with_no_span() {
+        let output = BiomeOutput {
+            diagnostics: vec![BiomeDiagnostic {
+                category: "lint/unknown/rule".to_string(),
+                severity: "warning".to_string(),
+                description: "Some warning".to_string(),
+                advices: BiomeAdvices { advices: vec![] },
+                location: BiomeLocation { span: None },
+            }],
+        };
+        let violations = convert_diagnostics(output, "content", "/src/app.ts");
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].line, None);
+        assert_eq!(violations[0].fix, "Some warning");
     }
 
     #[test]

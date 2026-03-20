@@ -1,6 +1,7 @@
 mod ast;
 mod ast_security;
 mod biome;
+mod color;
 mod config;
 mod oxlint;
 mod parse_json;
@@ -74,26 +75,70 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
     Some((file_path, content))
 }
 
+fn try_external_lint(
+    content: &str,
+    file_path: &str,
+    resolve: fn(&str) -> Option<std::path::PathBuf>,
+    check: fn(&str, &str, &std::path::Path) -> Option<Vec<Violation>>,
+) -> Option<Vec<Violation>> {
+    let bin = resolve(file_path)?;
+    check(content, file_path, &bin)
+}
+
+// Priority: oxlint first (faster), biome as fallback.
+fn lint_with_external_tools(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {
+    let mut results = None;
+    if config.rules.oxlint {
+        results = try_external_lint(content, file_path, oxlint::resolve, oxlint::check);
+    }
+    if results.is_none() && config.rules.biome {
+        results = try_external_lint(content, file_path, biome::resolve, biome::check);
+    }
+    if let Some(found) = results {
+        return found;
+    }
+    if (config.rules.oxlint || config.rules.biome)
+        && std::env::var_os("GUARDRAILS_VERBOSE").is_some()
+    {
+        eprintln!(
+            "guardrails: warning: no external linter available for {}",
+            file_path
+        );
+    }
+    Vec::new()
+}
+
+fn lint_with_ast(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {
+    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+        let mut found = Vec::new();
+        if config.rules.ast_security {
+            if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
+                found.push(v);
+            }
+            found.extend(ast_security::check_program(
+                program,
+                line_offsets,
+                file_path,
+            ));
+        }
+        if config.rules.no_use_effect {
+            found.extend(rules::no_use_effect::check_program(
+                program,
+                line_offsets,
+                file_path,
+            ));
+        }
+        found
+    })
+    .unwrap_or_default()
+}
+
 fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Violation> {
     let mut violations = Vec::new();
     let is_js = RE_JS_FILE.is_match(file_path);
 
-    // Priority: oxlint first (faster), biome as fallback. Only one runs per check.
     if is_js {
-        let mut linted = false;
-        if config.rules.oxlint {
-            if let Some(bin) = oxlint::resolve(file_path) {
-                if let Some(results) = oxlint::check(content, file_path, &bin) {
-                    violations.extend(results);
-                    linted = true;
-                }
-            }
-        }
-        if !linted && config.rules.biome {
-            if let Some(bin) = biome::resolve(file_path) {
-                violations.extend(biome::check(content, file_path, &bin));
-            }
-        }
+        violations.extend(lint_with_external_tools(content, file_path, config));
     }
 
     let lines = non_comment_lines(content);
@@ -107,31 +152,7 @@ fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Vi
 
     let has_ast_rules = config.rules.ast_security || config.rules.no_use_effect;
     if is_js && has_ast_rules {
-        let ast_violations =
-            ast::with_parsed_program(content, file_path, |program, line_offsets| {
-                let mut found = Vec::new();
-                if config.rules.ast_security {
-                    if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
-                        found.push(v);
-                    }
-                    found.extend(ast_security::check_program(
-                        program,
-                        line_offsets,
-                        file_path,
-                    ));
-                }
-                if config.rules.no_use_effect {
-                    found.extend(rules::no_use_effect::check_program(
-                        program,
-                        line_offsets,
-                        file_path,
-                    ));
-                }
-                found
-            });
-        if let Some(v) = ast_violations {
-            violations.extend(v);
-        }
+        violations.extend(lint_with_ast(content, file_path, config));
     }
 
     violations
@@ -146,48 +167,63 @@ fn partition_violations<'a>(
         .partition(|v| config.severity.block_on.contains(&v.severity))
 }
 
-fn main() {
+// Fail-closed: reject oversized input rather than silently truncating.
+fn parse_stdin() -> Result<ToolInput, i32> {
     let mut input_str = String::new();
-    let bytes_read = match io::stdin()
+    let bytes_read = io::stdin()
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
-    {
-        Ok(n) => n,
-        Err(e) => {
+        .map_err(|e| {
             eprintln!("guardrails: failed to read stdin: {}", e);
-            std::process::exit(1);
-        }
-    };
+            1
+        })?;
 
-    // Fail-closed on truncation: oversized input cannot be reliably checked.
     if bytes_read as u64 > MAX_INPUT_SIZE {
         eprintln!(
             "guardrails: input too large (>{} bytes), blocking as precaution",
             MAX_INPUT_SIZE
         );
-        std::process::exit(2);
+        return Err(2);
     }
 
-    let input: ToolInput = match serde_json::from_str(&input_str) {
+    serde_json::from_str(&input_str).map_err(|e| {
+        eprintln!("guardrails: invalid JSON input: {}", e);
+        1
+    })
+}
+
+fn main() {
+    let input = match parse_stdin() {
         Ok(v) => v,
-        Err(e) => {
-            eprintln!("guardrails: invalid JSON input: {}", e);
-            std::process::exit(1);
-        }
+        Err(code) => std::process::exit(code),
     };
 
     let Some((file_path, content)) = get_file_and_content(&input) else {
-        eprintln!(
-            "guardrails: skipping {} (unsupported or empty)",
-            input.tool_name
+        let is_write_tool = matches!(
+            input.tool_name.as_str(),
+            tool_name::WRITE | tool_name::EDIT | tool_name::MULTI_EDIT
         );
+        if is_write_tool {
+            eprintln!(
+                "guardrails: warning: {} has missing or empty file_path/content",
+                input.tool_name
+            );
+        } else {
+            eprintln!(
+                "guardrails: skipping {} (unsupported tool)",
+                input.tool_name
+            );
+        }
         std::process::exit(0);
     };
 
-    let config = match Config::default().with_project_overrides(&file_path) {
+    let config = match Config::default().with_project_overrides() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("guardrails: config error (using defaults): {}", e);
+            eprintln!(
+                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {}",
+                e
+            );
             Config::default()
         }
     };
@@ -249,8 +285,6 @@ mod tests {
             line: Some(1),
         }
     }
-
-    // --- get_file_and_content ---
 
     #[test]
     fn write_extracts_content() {
@@ -352,8 +386,6 @@ mod tests {
         assert!(get_file_and_content(&input).is_none());
     }
 
-    // --- collect_violations ---
-
     #[test]
     fn collect_violations_detects_eval() {
         let config = Config::default();
@@ -428,8 +460,6 @@ mod tests {
         );
         assert!(!violations.iter().any(|v| v.rule == "no-use-effect"));
     }
-
-    // --- partition_violations ---
 
     #[test]
     fn partition_high_blocks_by_default() {
