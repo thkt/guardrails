@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "guardrails"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "libc",
  "oxc_allocator",
