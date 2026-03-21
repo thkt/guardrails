@@ -47,10 +47,20 @@ fn wait_with_timeout(
                 tool,
                 LINTER_TIMEOUT.as_secs()
             );
-            // SAFETY: child_pid is from child.id() (valid PID).
-            // Direct syscall avoids spawning a subprocess for kill.
-            unsafe {
-                libc::kill(child_pid as i32, libc::SIGKILL);
+            #[cfg(unix)]
+            {
+                // SAFETY: child_pid is from child.id() (valid PID on Unix).
+                unsafe {
+                    libc::kill(child_pid as i32, libc::SIGKILL);
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/PID", &child_pid.to_string()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
             }
             None
         }
