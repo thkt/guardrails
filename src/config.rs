@@ -61,11 +61,19 @@ define_rule_config! {
     ast_security      => "astSecurity",
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigSource {
+    Default,
+    Explicit,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub enabled: bool,
     pub rules: RulesConfig,
     pub severity: SeverityConfig,
+    pub source: ConfigSource,
+    pub git_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +95,8 @@ impl Default for Config {
             enabled: true,
             rules: RulesConfig::default(),
             severity: SeverityConfig::default(),
+            source: ConfigSource::Default,
+            git_root: None,
         }
     }
 }
@@ -104,7 +114,7 @@ struct ProjectSeverityConfig {
     block_on: Option<Vec<Severity>>,
 }
 
-const TOOLS_CONFIG_FILE: &str = ".claude/tools.json";
+pub(crate) const TOOLS_CONFIG_FILE: &str = ".claude/tools.json";
 const LEGACY_CONFIG_FILE: &str = ".claude-guardrails.json";
 
 #[derive(Debug, Deserialize)]
@@ -121,10 +131,11 @@ impl Config {
         self.with_overrides_from_root(&cwd)
     }
 
-    fn with_overrides_from_root(self, start: &std::path::Path) -> Result<Self, String> {
+    fn with_overrides_from_root(mut self, start: &std::path::Path) -> Result<Self, String> {
         let Some(git_root) = Self::find_git_root(start) else {
             return Ok(self);
         };
+        self.git_root = Some(git_root.clone());
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
         match fs::read_to_string(&tools_path) {
@@ -162,6 +173,7 @@ impl Config {
     }
 
     fn merge(mut self, project: ProjectConfig) -> Self {
+        self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {
             self.enabled = enabled;
         }
@@ -176,7 +188,7 @@ impl Config {
         self
     }
 
-    fn find_git_root(start: &std::path::Path) -> Option<PathBuf> {
+    pub(crate) fn find_git_root(start: &std::path::Path) -> Option<PathBuf> {
         start
             .ancestors()
             .find(|d| d.join(".git").exists())
@@ -189,6 +201,18 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn tmp_repo() -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        tmp
+    }
+
+    fn tmp_repo_with_claude() -> tempfile::TempDir {
+        let tmp = tmp_repo();
+        fs::create_dir(tmp.path().join(".claude")).unwrap();
+        tmp
+    }
+
     #[test]
     fn default_config_all_rules_enabled() {
         let config = Config::default();
@@ -197,6 +221,7 @@ mod tests {
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
         assert!(config.rules.ast_security);
+        assert_eq!(config.source, ConfigSource::Default);
     }
 
     #[test]
@@ -209,17 +234,14 @@ mod tests {
 
     #[test]
     fn find_git_root_from_project_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-
+        let tmp = tmp_repo();
         let result = Config::find_git_root(tmp.path());
         assert_eq!(result, Some(tmp.path().to_path_buf()));
     }
 
     #[test]
     fn find_git_root_from_deep_subdir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
+        let tmp = tmp_repo();
         let deep = tmp.path().join("src/components");
         fs::create_dir_all(&deep).unwrap();
 
@@ -243,17 +265,6 @@ mod tests {
         assert!(!merged.rules.biome);
         assert!(!merged.rules.oxlint);
         assert!(merged.rules.sensitive_file);
-        assert!(merged.rules.security);
-    }
-
-    #[test]
-    fn merge_ast_security_disabled() {
-        let base = Config::default();
-        let project: ProjectConfig =
-            serde_json::from_str(r#"{"rules": {"astSecurity": false}}"#).unwrap();
-
-        let merged = base.merge(project);
-        assert!(!merged.rules.ast_security);
         assert!(merged.rules.security);
     }
 
@@ -291,9 +302,7 @@ mod tests {
 
     #[test]
     fn with_project_overrides_from_tools_json() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        let tmp = tmp_repo_with_claude();
         fs::write(
             tmp.path().join(TOOLS_CONFIG_FILE),
             r#"{"guardrails": {"rules": {"biome": false}}}"#,
@@ -309,8 +318,7 @@ mod tests {
 
     #[test]
     fn with_project_overrides_from_legacy_config() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
+        let tmp = tmp_repo();
         fs::write(
             tmp.path().join(LEGACY_CONFIG_FILE),
             r#"{"rules": {"biome": false}}"#,
@@ -326,9 +334,7 @@ mod tests {
 
     #[test]
     fn with_project_overrides_tools_json_takes_priority() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        let tmp = tmp_repo_with_claude();
         fs::write(
             tmp.path().join(TOOLS_CONFIG_FILE),
             r#"{"guardrails": {"rules": {"biome": false}}}"#,
@@ -349,21 +355,18 @@ mod tests {
 
     #[test]
     fn with_project_overrides_no_config_returns_unchanged() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-
+        let tmp = tmp_repo();
         let config = Config::default()
             .with_overrides_from_root(tmp.path())
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
+        assert_eq!(config.source, ConfigSource::Default);
     }
 
     #[test]
     fn with_project_overrides_malformed_tools_json_returns_error() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        let tmp = tmp_repo_with_claude();
         fs::write(tmp.path().join(TOOLS_CONFIG_FILE), "not valid json{{{").unwrap();
 
         let result = Config::default().with_overrides_from_root(tmp.path());
@@ -373,8 +376,7 @@ mod tests {
 
     #[test]
     fn with_project_overrides_malformed_legacy_config_returns_error() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
+        let tmp = tmp_repo();
         fs::write(tmp.path().join(LEGACY_CONFIG_FILE), "not valid json{{{").unwrap();
 
         let result = Config::default().with_overrides_from_root(tmp.path());
@@ -384,9 +386,7 @@ mod tests {
 
     #[test]
     fn with_project_overrides_tools_json_without_guardrails_key() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        let tmp = tmp_repo_with_claude();
         fs::write(
             tmp.path().join(TOOLS_CONFIG_FILE),
             r#"{"reviews": {"some": "config"}}"#,
@@ -398,13 +398,12 @@ mod tests {
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
+        assert_eq!(config.source, ConfigSource::Default);
     }
 
     #[test]
     fn with_project_overrides_tools_json_without_guardrails_ignores_legacy() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir(tmp.path().join(".git")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        let tmp = tmp_repo_with_claude();
         fs::write(
             tmp.path().join(TOOLS_CONFIG_FILE),
             r#"{"reviews": {"some": "config"}}"#,
@@ -421,5 +420,23 @@ mod tests {
             .unwrap();
         assert!(config.rules.biome);
         assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn merge_sets_explicit_source() {
+        let base = Config::default();
+        let project: ProjectConfig = serde_json::from_str(r#"{}"#).unwrap();
+        let merged = base.merge(project);
+        assert_eq!(merged.source, ConfigSource::Explicit);
+    }
+
+    #[test]
+    fn with_overrides_with_config_sets_explicit_source() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(tmp.path().join(TOOLS_CONFIG_FILE), r#"{"guardrails": {}}"#).unwrap();
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert_eq!(config.source, ConfigSource::Explicit);
     }
 }

@@ -11,7 +11,7 @@ mod rules;
 mod scanner;
 mod tempfile_util;
 
-use config::Config;
+use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
 use reporter::{format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
 use std::io::{self, Read};
@@ -192,6 +192,60 @@ fn parse_stdin() -> Result<ToolInput, i32> {
     })
 }
 
+const DEFAULT_TOOLS_JSON: &str = r#"{"guardrails": {}}
+"#;
+
+const CONFIG_HINT_MESSAGE: &str =
+    "Guardrails: using defaults. Customize via .claude/tools.json \u{2014} see https://github.com/thkt/guardrails#configuration";
+
+#[derive(Debug, PartialEq)]
+enum HintAction {
+    Skip,
+    Hint,
+    CreateAndHint(std::path::PathBuf),
+}
+
+fn config_hint_action(git_root: &std::path::Path, config: &Config) -> HintAction {
+    if config.source != ConfigSource::Default {
+        return HintAction::Skip;
+    }
+    let tools_path = git_root.join(TOOLS_CONFIG_FILE);
+    if tools_path.exists() {
+        return HintAction::Hint;
+    }
+    let Some(claude_dir) = tools_path.parent() else {
+        return HintAction::Skip;
+    };
+    if claude_dir.is_dir() {
+        HintAction::CreateAndHint(tools_path)
+    } else {
+        HintAction::Skip
+    }
+}
+
+fn show_config_hint(config: &Config) {
+    let Some(ref git_root) = config.git_root else {
+        return;
+    };
+    match config_hint_action(git_root, config) {
+        HintAction::Skip => {}
+        HintAction::CreateAndHint(path) => {
+            if let Err(e) = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, DEFAULT_TOOLS_JSON.as_bytes()))
+            {
+                eprintln!("guardrails: failed to create {}: {}", path.display(), e);
+            }
+            eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
+        }
+        HintAction::Hint => {
+            eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
+        }
+    }
+}
+
 fn main() {
     let input = match parse_stdin() {
         Ok(v) => v,
@@ -227,6 +281,8 @@ fn main() {
             Config::default()
         }
     };
+
+    show_config_hint(&config);
 
     if !config.enabled {
         std::process::exit(0);
@@ -369,21 +425,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_path_returns_none() {
-        let input = make_write_input(Some(""), Some("content"));
-        assert!(get_file_and_content(&input).is_none());
-    }
-
-    #[test]
-    fn empty_content_returns_none() {
-        let input = make_write_input(Some("/src/app.ts"), Some(""));
-        assert!(get_file_and_content(&input).is_none());
-    }
-
-    #[test]
-    fn missing_path_returns_none() {
-        let input = make_write_input(None, Some("content"));
-        assert!(get_file_and_content(&input).is_none());
+    fn invalid_path_or_content_returns_none() {
+        for (label, path, content) in [
+            ("empty path", Some(""), Some("content")),
+            ("empty content", Some("/src/app.ts"), Some("")),
+            ("missing path", None, Some("content")),
+        ] {
+            let input = make_write_input(path, content);
+            assert!(get_file_and_content(&input).is_none(), "case: {label}");
+        }
     }
 
     #[test]
@@ -462,30 +512,28 @@ mod tests {
     }
 
     #[test]
-    fn partition_high_blocks_by_default() {
+    fn partition_default_severity_routing() {
         let config = Config::default();
-        let violations = vec![make_violation("test", Severity::High)];
-        let (blocking, warnings) = partition_violations(&violations, &config);
-        assert_eq!(blocking.len(), 1);
-        assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn partition_medium_warns_by_default() {
-        let config = Config::default();
-        let violations = vec![make_violation("test", Severity::Medium)];
-        let (blocking, warnings) = partition_violations(&violations, &config);
-        assert!(blocking.is_empty());
-        assert_eq!(warnings.len(), 1);
-    }
-
-    #[test]
-    fn partition_critical_blocks_by_default() {
-        let config = Config::default();
-        let violations = vec![make_violation("test", Severity::Critical)];
-        let (blocking, warnings) = partition_violations(&violations, &config);
-        assert_eq!(blocking.len(), 1);
-        assert!(warnings.is_empty());
+        for (severity, expect_block) in [
+            (Severity::Critical, true),
+            (Severity::High, true),
+            (Severity::Medium, false),
+        ] {
+            let violations = vec![make_violation("test", severity)];
+            let (blocking, warnings) = partition_violations(&violations, &config);
+            assert_eq!(
+                !blocking.is_empty(),
+                expect_block,
+                "{severity:?} should {}",
+                if expect_block { "block" } else { "warn" }
+            );
+            assert_eq!(
+                !warnings.is_empty(),
+                !expect_block,
+                "{severity:?} should {}",
+                if expect_block { "block" } else { "warn" }
+            );
+        }
     }
 
     #[test]
@@ -510,5 +558,43 @@ mod tests {
         let (blocking, warnings) = partition_violations(&violations, &config);
         assert!(blocking.is_empty());
         assert!(warnings.is_empty());
+    }
+
+    fn tmp_with_claude() -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".claude")).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn hint_action_skip_when_explicit_source() {
+        let tmp = tmp_with_claude();
+        let mut config = Config::default();
+        config.source = ConfigSource::Explicit;
+        assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Skip);
+    }
+
+    #[test]
+    fn hint_action_skip_when_no_claude_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = Config::default();
+        assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Skip);
+    }
+
+    #[test]
+    fn hint_action_create_when_no_tools_json() {
+        let tmp = tmp_with_claude();
+        let config = Config::default();
+        let expected = HintAction::CreateAndHint(tmp.path().join(TOOLS_CONFIG_FILE));
+        assert_eq!(config_hint_action(tmp.path(), &config), expected);
+    }
+
+    #[test]
+    fn hint_action_hint_when_tools_json_without_guardrails() {
+        let tmp = tmp_with_claude();
+        std::fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
+
+        let config = Config::default();
+        assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
     }
 }
