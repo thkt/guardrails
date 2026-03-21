@@ -6,8 +6,8 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 
 ## Features
 
-- **oxlint integration** (priority): Lint rules from [oxc.rs](https://oxc.rs) with ESLint plugin compatibility
-- **biome integration** (fallback): 300+ lint rules from [biomejs.dev](https://biomejs.dev)
+- **oxlint auto-provision**: Automatically resolves or downloads [oxlint](https://oxc.rs) — no manual install needed
+- **AI-tuned deny rules**: Enables `no-explicit-any`, `ban-ts-comment`, `no-non-null-assertion`, `no-console` by default via `--deny`
 - **Custom rules**: Security patterns external linters don't cover (JS/TS)
 - **AST-based security checks**: Deep analysis via [oxc](https://oxc.rs) parser (command injection, stack exposure, path traversal)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
@@ -83,22 +83,34 @@ When installed as a plugin, hooks are registered automatically. For manual setup
 
 ## Requirements
 
-Install at least one external linter (oxlint is preferred):
+No external linter installation required. guardrails automatically resolves oxlint:
 
-- [oxlint](https://oxc.rs) CLI installed (`npm i -g oxlint`) — **recommended**
-- [biome](https://biomejs.dev) CLI installed (`brew install biome` or `npm i -g @biomejs/biome`) — fallback
+1. `node_modules/.bin/oxlint` (project-local)
+2. `oxlint` on `PATH` (global install)
+3. `~/.cache/guardrails/bin/oxlint-{version}` (cached download)
+4. Auto-download from GitHub Releases (first run only)
 
-### Linter Priority
+If all resolution steps fail (e.g., no network), guardrails continues with custom rules only (fail-open).
 
-guardrails uses **oxlint first**. If oxlint is not available, it falls back to biome. Only one runs per check.
+| Condition        | Linter used       |
+| ---------------- | ----------------- |
+| oxlint found     | oxlint + custom   |
+| oxlint not found | Custom rules only |
 
-| Condition                             | Linter used       |
-| ------------------------------------- | ----------------- |
-| oxlint installed                      | oxlint            |
-| oxlint not installed, biome installed | biome             |
-| Neither installed                     | Custom rules only |
+Project config files (`oxlintrc.json`) are automatically used when present.
 
-Project config files (`oxlintrc.json`, `biome.json`) are automatically used when present.
+### AI-Tuned Deny Rules
+
+guardrails enables these oxlint rules via `--deny` (off by default in oxlint, important for AI-generated code):
+
+| Rule                               | Why                                      |
+| ---------------------------------- | ---------------------------------------- |
+| `typescript/no-explicit-any`       | AI uses `any` / `as any` to bypass types |
+| `typescript/ban-ts-comment`        | AI uses `@ts-ignore` to suppress errors  |
+| `typescript/no-non-null-assertion` | AI uses `!` to skip null checks          |
+| `eslint/no-console`                | AI leaves debug `console.log`            |
+
+Customize via `oxlint.deny` / `oxlint.allow` in config (see below).
 
 ## Custom Rules
 
@@ -166,7 +178,6 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
     "enabled": true,
     "rules": {
       "oxlint": true,
-      "biome": true,
       "sensitiveFile": true,
       "cryptoWeak": true,
       "sensitiveLogging": true,
@@ -189,6 +200,10 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
       "noUseEffect": true,
       "astSecurity": true
     },
+    "oxlint": {
+      "deny": [],
+      "allow": []
+    },
     "severity": {
       "blockOn": ["critical", "high"]
     }
@@ -196,34 +211,43 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
 }
 ```
 
+#### `oxlint.deny` / `oxlint.allow`
+
+Add extra rules to enforce or suppress the default deny list:
+
+```json
+{
+  "guardrails": {
+    "oxlint": {
+      "deny": ["eslint/curly"],
+      "allow": ["eslint/no-console"]
+    }
+  }
+}
+```
+
+- `deny`: additional rules to enable via `--deny` (merged with defaults)
+- `allow`: rules to exclude from the deny list (e.g., allow `console.log` for CLI projects)
+
 ### Examples
 
-**Minimal** (oxlint only, everything else default):
+**Default** (no config needed):
+
+All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
+
+**Custom rules only** (disable oxlint):
 
 ```json
 {
   "guardrails": {
     "rules": {
-      "oxlint": true
+      "oxlint": false
     }
   }
 }
 ```
 
-**Custom rules only** (disable external linters):
-
-```json
-{
-  "guardrails": {
-    "rules": {
-      "oxlint": false,
-      "biome": false
-    }
-  }
-}
-```
-
-**Backend (Node.js/API)** — disable frontend-specific rules:
+**Backend (Node.js/API)** — disable frontend-specific rules, allow console:
 
 ```json
 {
@@ -231,6 +255,9 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
     "rules": {
       "domAccess": false,
       "bundleSize": false
+    },
+    "oxlint": {
+      "allow": ["eslint/no-console"]
     }
   }
 }
@@ -274,21 +301,20 @@ project-root/
 
 ## Using with Existing Linters
 
-If you already run oxlint/biome via lefthook, husky, or lint-staged on commit, guardrails' linter checks may overlap. The two serve different purposes:
+If you already run oxlint via lefthook, husky, or lint-staged on commit, guardrails' linter checks may overlap. The two serve different purposes:
 
 | Tool              | When                | Purpose                               |
 | ----------------- | ------------------- | ------------------------------------- |
 | guardrails (hook) | On every file write | Prevent issues before they're written |
 | lefthook / husky  | On commit           | Final gate before code enters history |
 
-To disable external linters in guardrails and rely on your commit hook instead:
+To disable oxlint in guardrails and rely on your commit hook instead:
 
 ```json
 {
   "guardrails": {
     "rules": {
-      "oxlint": false,
-      "biome": false
+      "oxlint": false
     }
   }
 }

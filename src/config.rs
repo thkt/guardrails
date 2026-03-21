@@ -72,6 +72,7 @@ pub struct Config {
     pub enabled: bool,
     pub rules: RulesConfig,
     pub severity: SeverityConfig,
+    pub oxlint_config: OxlintConfig,
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
 }
@@ -89,12 +90,19 @@ impl Default for SeverityConfig {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct OxlintConfig {
+    pub deny: Vec<String>,
+    pub allow: Vec<String>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: true,
             rules: RulesConfig::default(),
             severity: SeverityConfig::default(),
+            oxlint_config: OxlintConfig::default(),
             source: ConfigSource::Default,
             git_root: None,
         }
@@ -102,10 +110,17 @@ impl Default for Config {
 }
 
 #[derive(Debug, Deserialize)]
+struct ProjectOxlintConfig {
+    deny: Option<Vec<String>>,
+    allow: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ProjectConfig {
     enabled: Option<bool>,
     rules: Option<ProjectRulesConfig>,
     severity: Option<ProjectSeverityConfig>,
+    oxlint: Option<ProjectOxlintConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,11 +193,24 @@ impl Config {
             self.enabled = enabled;
         }
         if let Some(pr) = project.rules {
+            if pr.biome == Some(true) {
+                eprintln!(
+                    "guardrails: warning: \"biome\" option is deprecated and ignored. oxlint is used instead."
+                );
+            }
             self.rules.apply_overrides(pr);
         }
         if let Some(ps) = project.severity {
             if let Some(block_on) = ps.block_on {
                 self.severity.block_on = block_on;
+            }
+        }
+        if let Some(oc) = project.oxlint {
+            if let Some(deny) = oc.deny {
+                self.oxlint_config.deny = deny;
+            }
+            if let Some(allow) = oc.allow {
+                self.oxlint_config.allow = allow;
             }
         }
         self
@@ -438,5 +466,71 @@ mod tests {
             .with_overrides_from_root(tmp.path())
             .unwrap();
         assert_eq!(config.source, ConfigSource::Explicit);
+    }
+
+    #[test]
+    fn default_oxlint_config_is_empty() {
+        let config = Config::default();
+        assert!(config.oxlint_config.deny.is_empty());
+        assert!(config.oxlint_config.allow.is_empty());
+    }
+
+    // T-008: oxlint deny from tools.json
+    #[test]
+    fn oxlint_deny_from_tools_json() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"guardrails": {"oxlint": {"deny": ["eslint/curly"]}}}"#,
+        )
+        .unwrap();
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert_eq!(config.oxlint_config.deny, vec!["eslint/curly"]);
+        assert!(config.oxlint_config.allow.is_empty());
+    }
+
+    // T-009: oxlint allow from tools.json
+    #[test]
+    fn oxlint_allow_from_tools_json() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"guardrails": {"oxlint": {"allow": ["eslint/no-console"]}}}"#,
+        )
+        .unwrap();
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert_eq!(config.oxlint_config.allow, vec!["eslint/no-console"]);
+    }
+
+    // T-011: biome=true does not error (backward compat)
+    #[test]
+    fn biome_true_does_not_error() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"guardrails": {"rules": {"biome": true}}}"#,
+        )
+        .unwrap();
+        let result = Config::default().with_overrides_from_root(tmp.path());
+        assert!(result.is_ok());
+    }
+
+    // T-012: biome=false normal operation
+    #[test]
+    fn biome_false_normal_operation() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"guardrails": {"rules": {"biome": false}}}"#,
+        )
+        .unwrap();
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert!(!config.rules.biome);
     }
 }

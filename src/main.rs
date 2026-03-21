@@ -1,8 +1,8 @@
 mod ast;
 mod ast_security;
-mod biome;
 mod color;
 mod config;
+mod download;
 mod oxlint;
 mod parse_json;
 mod reporter;
@@ -75,37 +75,22 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
     Some((file_path, content))
 }
 
-fn try_external_lint(
-    content: &str,
-    file_path: &str,
-    resolve: fn(&str) -> Option<std::path::PathBuf>,
-    check: fn(&str, &str, &std::path::Path) -> Option<Vec<Violation>>,
-) -> Option<Vec<Violation>> {
-    let bin = resolve(file_path)?;
-    check(content, file_path, &bin)
-}
-
-// Priority: oxlint first (faster), biome as fallback.
 fn lint_with_external_tools(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {
-    let mut results = None;
-    if config.rules.oxlint {
-        results = try_external_lint(content, file_path, oxlint::resolve, oxlint::check);
+    if !config.rules.oxlint {
+        return Vec::new();
     }
-    if results.is_none() && config.rules.biome {
-        results = try_external_lint(content, file_path, biome::resolve, biome::check);
-    }
-    if let Some(found) = results {
-        return found;
-    }
-    if (config.rules.oxlint || config.rules.biome)
-        && std::env::var_os("GUARDRAILS_VERBOSE").is_some()
-    {
-        eprintln!(
-            "guardrails: warning: no external linter available for {}",
-            file_path
-        );
-    }
-    Vec::new()
+
+    let Some(bin) = oxlint::resolve(file_path) else {
+        if std::env::var_os("GUARDRAILS_VERBOSE").is_some() {
+            eprintln!(
+                "guardrails: warning: oxlint not available for {}",
+                file_path
+            );
+        }
+        return Vec::new();
+    };
+
+    oxlint::check(content, file_path, &bin, &config.oxlint_config).unwrap_or_default()
 }
 
 fn lint_with_ast(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {

@@ -192,14 +192,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let bin_dir = tmp.path().join("node_modules/.bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        let bin_path = bin_dir.join("biome");
+        let bin_path = bin_dir.join("oxlint");
         fs::write(&bin_path, "").unwrap();
 
         let deep_dir = tmp.path().join("src/components");
         fs::create_dir_all(&deep_dir).unwrap();
         let file_path = deep_dir.join("Button.tsx");
 
-        let result = try_resolve_bin("biome", file_path.to_str().unwrap());
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
         assert_eq!(result, Some(bin_path));
     }
 

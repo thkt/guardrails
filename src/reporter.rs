@@ -4,16 +4,10 @@ use crate::rules::Violation;
 const HEADER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 const FOOTER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
-fn format_rule_name(rule: &str) -> (String, &'static str) {
-    if rule.starts_with("biome/") {
-        let short = rule.strip_prefix("biome/lint/").unwrap_or(rule);
-        let name = short.rsplit('/').next().unwrap_or(short);
-        (name.to_string(), "biome")
-    } else if rule.starts_with("oxlint/") {
-        let name = rule.strip_prefix("oxlint/").unwrap_or(rule);
-        (name.to_string(), "oxlint")
-    } else {
-        (rule.to_string(), "guardrails")
+fn format_rule_name(rule: &str) -> (&str, &'static str) {
+    match rule.strip_prefix("oxlint/") {
+        Some(name) => (name, "oxlint"),
+        None => (rule, "guardrails"),
     }
 }
 
@@ -100,13 +94,6 @@ mod tests {
     }
 
     #[test]
-    fn format_rule_name_biome() {
-        let (name, source) = format_rule_name("biome/lint/suspicious/noExplicitAny");
-        assert_eq!(name, "noExplicitAny");
-        assert_eq!(source, "biome");
-    }
-
-    #[test]
     fn format_rule_name_oxlint() {
         let (name, source) = format_rule_name("oxlint/eslint(no-debugger)");
         assert_eq!(name, "eslint(no-debugger)");
@@ -150,11 +137,15 @@ mod tests {
 
     #[test]
     fn format_warnings_contains_warning_symbol() {
-        let v = make_violation("biome/lint/style/useConst", Severity::Low, "Use const");
+        let v = make_violation(
+            "oxlint/eslint(no-console)",
+            Severity::Low,
+            "Remove console.log",
+        );
         let output = strip_ansi(&format_warnings(&[&v]));
         assert!(output.contains("Guardrails"));
         assert!(output.contains("⚠"));
-        assert!(output.contains("useConst (biome) [LOW]"));
-        assert!(output.contains("fix: Use const"));
+        assert!(output.contains("eslint(no-console) (oxlint) [LOW]"));
+        assert!(output.contains("fix: Remove console.log"));
     }
 }
