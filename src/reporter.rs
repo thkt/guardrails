@@ -40,7 +40,7 @@ pub fn format_violations(violations: &[&Violation]) -> String {
 
     lines.push(color::bold_red(FOOTER_SEPARATOR));
     lines.push(color::bold_red(&format!(
-        "BLOCKED: Fix {} issue{} and retry.",
+        "BLOCKED: Fix {} issue{} in the source code and retry. Do not circumvent this check.",
         violations.len(),
         if violations.len() == 1 { "" } else { "s" }
     )));
