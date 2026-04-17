@@ -85,10 +85,10 @@ mod tests {
 
     fn make_violation(rule: &str, severity: Severity, fix: &str) -> Violation {
         Violation {
-            rule: rule.to_string(),
+            rule: rule.to_owned(),
             severity,
-            fix: fix.to_string(),
-            file: "/src/app.ts".to_string(),
+            fix: fix.to_owned(),
+            file: "/src/app.ts".to_owned(),
             line: Some(1),
         }
     }

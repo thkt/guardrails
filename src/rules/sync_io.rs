@@ -80,13 +80,13 @@ pub fn rule() -> Rule {
             for io in SYNC_IO.iter() {
                 if let Some(line_num) = find_match_in_lines(lines, io.pattern) {
                     violations.push(Violation {
-                        rule: super::rule_id::SYNC_IO.to_string(),
+                        rule: super::rule_id::SYNC_IO.to_owned(),
                         severity: Severity::Medium,
                         fix: format!(
                             "{} blocks the event loop. Use {} instead.",
                             io.method, io.async_alternative
                         ),
-                        file: file_path.to_string(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &crate::rules::non_comment_lines(content))
+        rule().check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

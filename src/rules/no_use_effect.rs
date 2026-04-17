@@ -1,6 +1,6 @@
 use super::{rule_id, Severity, Violation, RE_REACT_FILE};
 use crate::ast;
-use oxc_ast::ast::*;
+use oxc_ast::ast::{CallExpression, Expression, Program, Span};
 use oxc_ast_visit::{walk, Visit};
 
 const FIX_MESSAGE: &str = "Avoid useEffect. Consider: \
@@ -52,10 +52,10 @@ impl<'a> Visit<'a> for UseEffectVisitor<'_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.violation.is_none() && is_use_effect_callee(&call.callee) {
             self.violation = Some(Violation {
-                rule: rule_id::NO_USE_EFFECT.to_string(),
+                rule: rule_id::NO_USE_EFFECT.to_owned(),
                 severity: Severity::Medium,
-                fix: FIX_MESSAGE.to_string(),
-                file: self.file_path.to_string(),
+                fix: FIX_MESSAGE.to_owned(),
+                file: self.file_path.to_owned(),
                 line: Some(self.span_to_line(call.span)),
             });
             return;

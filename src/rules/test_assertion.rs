@@ -40,14 +40,14 @@ pub fn rule() -> Rule {
                 let line_num = offset_to_line(&line_offsets, test_start);
 
                 violations.push(Violation {
-                    rule: super::rule_id::TEST_ASSERTION.to_string(),
+                    rule: super::rule_id::TEST_ASSERTION.to_owned(),
                     severity: Severity::Medium,
                     fix: format!(
                         "Test '{}' has no assertions. Add expect() or assert calls.",
                         test_name
                     ),
-                    file: file_path.to_string(),
-                    line: Some(line_num as u32),
+                    file: file_path.to_owned(),
+                    line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
                 });
             }
 
@@ -64,7 +64,7 @@ mod tests {
         rule().check(
             content,
             "/src/utils.test.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         )
     }
 

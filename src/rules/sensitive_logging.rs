@@ -3,6 +3,7 @@ use crate::scanner::{
     build_line_offsets, extract_delimited_content, offset_to_line, StringScanner,
 };
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 static RE_CONSOLE_CALL: LazyLock<Regex> = LazyLock::new(|| {
@@ -76,12 +77,12 @@ pub fn rule() -> Rule {
         file_pattern: RE_JS_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
-            let mut reported_lines = std::collections::HashSet::new();
+            let mut reported_lines = HashSet::new();
             let line_offsets = build_line_offsets(content);
 
             let check_match = |caps: regex::Match,
                                violations: &mut Vec<Violation>,
-                               reported_lines: &mut std::collections::HashSet<usize>,
+                               reported_lines: &mut HashSet<usize>,
                                msg: &str| {
                 if is_in_comment(content, caps.start()) {
                     return;
@@ -91,11 +92,11 @@ pub fn rule() -> Rule {
                         let line_num = offset_to_line(&line_offsets, caps.start());
                         if reported_lines.insert(line_num) {
                             violations.push(Violation {
-                                rule: super::rule_id::SENSITIVE_LOGGING.to_string(),
+                                rule: super::rule_id::SENSITIVE_LOGGING.to_owned(),
                                 severity: Severity::High,
-                                fix: msg.to_string(),
-                                file: file_path.to_string(),
-                                line: Some(line_num as u32),
+                                fix: msg.to_owned(),
+                                file: file_path.to_owned(),
+                                line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
                             });
                         }
                     }
@@ -133,7 +134,7 @@ mod tests {
         rule().check(
             content,
             "/src/auth/login.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         )
     }
 

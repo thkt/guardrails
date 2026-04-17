@@ -22,10 +22,10 @@ pub fn rule() -> Rule {
         checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             if SENSITIVE_PATTERNS.iter().any(|p| p.is_match(file_path)) {
                 return vec![Violation {
-                    rule: super::rule_id::SENSITIVE_FILE.to_string(),
+                    rule: super::rule_id::SENSITIVE_FILE.to_owned(),
                     severity: Severity::Critical,
-                    fix: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
-                    file: file_path.to_string(),
+                    fix: "Do not write to sensitive files. Use environment variables or secret management.".to_owned(),
+                    file: file_path.to_owned(),
                     line: None,
                 }];
             }

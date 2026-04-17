@@ -14,7 +14,11 @@ mod tempfile_util;
 use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
 use reporter::{format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
-use std::io::{self, Read};
+use std::env;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process;
 
 const MAX_INPUT_SIZE: u64 = 10_000_000;
 
@@ -81,7 +85,7 @@ fn lint_with_external_tools(content: &str, file_path: &str, config: &Config) -> 
     }
 
     let Some(bin) = oxlint::resolve(file_path) else {
-        if std::env::var_os("GUARDRAILS_VERBOSE").is_some() {
+        if env::var_os("GUARDRAILS_VERBOSE").is_some() {
             eprintln!(
                 "guardrails: warning: oxlint not available for {}",
                 file_path
@@ -187,10 +191,10 @@ const CONFIG_HINT_MESSAGE: &str =
 enum HintAction {
     Skip,
     Hint,
-    CreateAndHint(std::path::PathBuf),
+    CreateAndHint(PathBuf),
 }
 
-fn config_hint_action(git_root: &std::path::Path, config: &Config) -> HintAction {
+fn config_hint_action(git_root: &Path, config: &Config) -> HintAction {
     if config.source != ConfigSource::Default {
         return HintAction::Skip;
     }
@@ -215,11 +219,11 @@ fn show_config_hint(config: &Config) {
     match config_hint_action(git_root, config) {
         HintAction::Skip => {}
         HintAction::CreateAndHint(path) => {
-            if let Err(e) = std::fs::OpenOptions::new()
+            if let Err(e) = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&path)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, DEFAULT_TOOLS_JSON.as_bytes()))
+                .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
             {
                 eprintln!("guardrails: failed to create {}: {}", path.display(), e);
             }
@@ -234,7 +238,7 @@ fn show_config_hint(config: &Config) {
 fn main() {
     let input = match parse_stdin() {
         Ok(v) => v,
-        Err(code) => std::process::exit(code),
+        Err(code) => process::exit(code),
     };
 
     let Some((file_path, content)) = get_file_and_content(&input) else {
@@ -253,7 +257,7 @@ fn main() {
                 input.tool_name
             );
         }
-        std::process::exit(0);
+        process::exit(0);
     };
 
     let config = match Config::default().with_project_overrides() {
@@ -270,7 +274,7 @@ fn main() {
     show_config_hint(&config);
 
     if !config.enabled {
-        std::process::exit(0);
+        process::exit(0);
     }
 
     let violations = collect_violations(&file_path, &content, &config);
@@ -282,10 +286,10 @@ fn main() {
 
     if !blocking.is_empty() {
         eprintln!("{}", format_violations(&blocking));
-        std::process::exit(2);
+        process::exit(2);
     }
 
-    std::process::exit(0);
+    process::exit(0);
 }
 
 #[cfg(test)]
@@ -295,7 +299,7 @@ mod tests {
 
     fn make_write_input(file_path: Option<&str>, content: Option<&str>) -> ToolInput {
         ToolInput {
-            tool_name: tool_name::WRITE.to_string(),
+            tool_name: tool_name::WRITE.to_owned(),
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
                 content: content.map(String::from),
@@ -307,7 +311,7 @@ mod tests {
 
     fn make_edit_input(file_path: Option<&str>, new_string: Option<&str>) -> ToolInput {
         ToolInput {
-            tool_name: tool_name::EDIT.to_string(),
+            tool_name: tool_name::EDIT.to_owned(),
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
                 content: None,
@@ -319,10 +323,10 @@ mod tests {
 
     fn make_violation(rule: &str, severity: Severity) -> Violation {
         Violation {
-            rule: rule.to_string(),
+            rule: rule.to_owned(),
             severity,
-            fix: "fix".to_string(),
-            file: "/test.ts".to_string(),
+            fix: "fix".to_owned(),
+            file: "/test.ts".to_owned(),
             line: Some(1),
         }
     }
@@ -345,17 +349,17 @@ mod tests {
     #[test]
     fn multi_edit_joins_edits() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_string(),
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
-                file_path: Some("/src/app.ts".to_string()),
+                file_path: Some("/src/app.ts".to_owned()),
                 content: None,
                 new_string: None,
                 edits: Some(vec![
                     EditItem {
-                        new_string: Some("line1".to_string()),
+                        new_string: Some("line1".to_owned()),
                     },
                     EditItem {
-                        new_string: Some("line2".to_string()),
+                        new_string: Some("line2".to_owned()),
                     },
                 ]),
             },
@@ -367,9 +371,9 @@ mod tests {
     #[test]
     fn multi_edit_empty_edits_returns_none() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_string(),
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
-                file_path: Some("/src/app.ts".to_string()),
+                file_path: Some("/src/app.ts".to_owned()),
                 content: None,
                 new_string: None,
                 edits: Some(vec![]),
@@ -381,9 +385,9 @@ mod tests {
     #[test]
     fn multi_edit_all_none_returns_none() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_string(),
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
-                file_path: Some("/src/app.ts".to_string()),
+                file_path: Some("/src/app.ts".to_owned()),
                 content: None,
                 new_string: None,
                 edits: Some(vec![
@@ -398,10 +402,10 @@ mod tests {
     #[test]
     fn unsupported_tool_returns_none() {
         let input = ToolInput {
-            tool_name: "Bash".to_string(),
+            tool_name: "Bash".to_owned(),
             tool_input: ToolInputData {
-                file_path: Some("/tmp/x".to_string()),
-                content: Some("echo hi".to_string()),
+                file_path: Some("/tmp/x".to_owned()),
+                content: Some("echo hi".to_owned()),
                 new_string: None,
                 edits: None,
             },
@@ -547,15 +551,17 @@ mod tests {
 
     fn tmp_with_claude() -> tempfile::TempDir {
         let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir(tmp.path().join(".claude")).unwrap();
+        fs::create_dir(tmp.path().join(".claude")).unwrap();
         tmp
     }
 
     #[test]
     fn hint_action_skip_when_explicit_source() {
         let tmp = tmp_with_claude();
-        let mut config = Config::default();
-        config.source = ConfigSource::Explicit;
+        let config = Config {
+            source: ConfigSource::Explicit,
+            ..Config::default()
+        };
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Skip);
     }
 
@@ -577,7 +583,7 @@ mod tests {
     #[test]
     fn hint_action_hint_when_tools_json_without_guardrails() {
         let tmp = tmp_with_claude();
-        std::fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
+        fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
 
         let config = Config::default();
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);

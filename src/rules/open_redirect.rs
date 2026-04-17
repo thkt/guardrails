@@ -21,11 +21,11 @@ pub fn rule() -> Rule {
             for &(line_num, line) in lines {
                 if RE_LOCATION_ASSIGN.is_match(line) || RE_LOCATION_CALL.is_match(line) {
                     violations.push(Violation {
-                        rule: super::rule_id::OPEN_REDIRECT.to_string(),
+                        rule: super::rule_id::OPEN_REDIRECT.to_owned(),
                         severity: Severity::High,
                         fix: "Validate URL before redirect. Use allowlist or ensure relative path."
-                            .to_string(),
-                        file: file_path.to_string(),
+                            .to_owned(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -45,7 +45,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

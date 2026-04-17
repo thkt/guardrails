@@ -37,13 +37,13 @@ pub fn rule() -> Rule {
             }
 
             vec![Violation {
-                rule: super::rule_id::TRANSACTION_BOUNDARY.to_string(),
+                rule: super::rule_id::TRANSACTION_BOUNDARY.to_owned(),
                 severity: Severity::Medium,
                 fix: format!(
                     "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {} write ops detected",
                     write_count
                 ),
-                file: file_path.to_string(),
+                file: file_path.to_owned(),
                 line: find_match_in_lines(lines, &RE_WRITE_OPS),
             }]
         }),
@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &crate::rules::non_comment_lines(content))
+        rule().check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

@@ -62,10 +62,10 @@ pub fn rule() -> Rule {
             for pattern in FLAKY_PATTERNS.iter() {
                 if let Some(line_num) = find_match_in_lines(lines, pattern.pattern) {
                     violations.push(Violation {
-                        rule: super::rule_id::FLAKY_TEST.to_string(),
+                        rule: super::rule_id::FLAKY_TEST.to_owned(),
                         severity: Severity::Low,
                         fix: format!("{} can cause flaky tests. {}", pattern.name, pattern.reason),
-                        file: file_path.to_string(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -84,7 +84,7 @@ mod tests {
         rule().check(
             content,
             "/src/utils.test.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         )
     }
 

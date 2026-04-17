@@ -1,5 +1,6 @@
 use crate::config::OxlintConfig;
-use crate::resolve::run_linter_check;
+use crate::download::ensure_oxlint;
+use crate::resolve::{run_linter_check, try_resolve_bin};
 use crate::rules::{Severity, Violation};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ struct OxlintSpan {
 }
 
 pub fn resolve(file_path: &str) -> Option<PathBuf> {
-    crate::resolve::try_resolve_bin("oxlint", file_path).or_else(crate::download::ensure_oxlint)
+    try_resolve_bin("oxlint", file_path).or_else(ensure_oxlint)
 }
 
 pub fn check(
@@ -47,21 +48,21 @@ pub fn check(
     config: &OxlintConfig,
 ) -> Option<Vec<Violation>> {
     let args = build_args(config);
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let output: OxlintOutput = run_linter_check(content, file_path, bin, &arg_refs, "oxlint")?;
     Some(convert_diagnostics(output, file_path))
 }
 
 fn build_args(config: &OxlintConfig) -> Vec<String> {
-    let mut args = vec!["--format".to_string(), "json".to_string()];
+    let mut args = vec!["--format".to_owned(), "json".to_owned()];
 
     for rule in DEFAULT_DENY_RULES
         .iter()
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .chain(config.deny.iter().cloned())
     {
         if !config.allow.contains(&rule) {
-            args.push("--deny".to_string());
+            args.push("--deny".to_owned());
             args.push(rule);
         }
     }
@@ -80,7 +81,7 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
                 rule: format!("oxlint/{}", d.code),
                 severity,
                 fix: d.help.unwrap_or(d.message),
-                file: file_path.to_string(),
+                file: file_path.to_owned(),
                 line: d.labels.first().map(|l| l.span.line),
             }
         })
@@ -165,21 +166,21 @@ mod tests {
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
         assert_eq!(deny_count, 4);
-        assert!(args.contains(&"--format".to_string()));
-        assert!(args.contains(&"json".to_string()));
+        assert!(args.contains(&"--format".to_owned()));
+        assert!(args.contains(&"json".to_owned()));
     }
 
     // T-008: custom deny adds to defaults
     #[test]
     fn build_args_custom_deny_adds() {
         let config = OxlintConfig {
-            deny: vec!["eslint/curly".to_string()],
+            deny: vec!["eslint/curly".to_owned()],
             allow: vec![],
         };
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
         assert_eq!(deny_count, 5);
-        assert!(args.contains(&"eslint/curly".to_string()));
+        assert!(args.contains(&"eslint/curly".to_owned()));
     }
 
     // T-009: allow removes from defaults
@@ -187,11 +188,11 @@ mod tests {
     fn build_args_allow_removes_from_defaults() {
         let config = OxlintConfig {
             deny: vec![],
-            allow: vec!["eslint/no-console".to_string()],
+            allow: vec!["eslint/no-console".to_owned()],
         };
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
         assert_eq!(deny_count, 3);
-        assert!(!args.contains(&"eslint/no-console".to_string()));
+        assert!(!args.contains(&"eslint/no-console".to_owned()));
     }
 }

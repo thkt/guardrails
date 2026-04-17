@@ -1,5 +1,7 @@
 .DS_Store
-.claude
-
-/adr
-/target
+.yomu/
+.claude/
+.playwright-cli/
+docs/
+target/
+workspace/

@@ -1,7 +1,9 @@
+use std::fs;
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::path::Path;
+use std::process::{Command, Output, Stdio};
 
-fn run_guardrails(input: &[u8]) -> std::process::Output {
+fn run_guardrails(input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -14,11 +16,11 @@ fn run_guardrails(input: &[u8]) -> std::process::Output {
     child.wait_with_output().unwrap()
 }
 
-fn run_guardrails_json(json: &str) -> std::process::Output {
+fn run_guardrails_json(json: &str) -> Output {
     run_guardrails(json.as_bytes())
 }
 
-fn run_guardrails_in_dir(json: &str, dir: &std::path::Path) -> std::process::Output {
+fn run_guardrails_in_dir(json: &str, dir: &Path) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
         .current_dir(dir)
         .env("NO_COLOR", "1")
@@ -242,13 +244,13 @@ fn multi_edit_with_violation_exits_two() {
 
 fn tmp_repo() -> tempfile::TempDir {
     let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    fs::create_dir(tmp.path().join(".git")).unwrap();
     tmp
 }
 
 fn tmp_repo_with_claude() -> tempfile::TempDir {
     let tmp = tmp_repo();
-    std::fs::create_dir(tmp.path().join(".claude")).unwrap();
+    fs::create_dir(tmp.path().join(".claude")).unwrap();
     tmp
 }
 
@@ -277,7 +279,7 @@ fn hint_shown_when_claude_dir_exists_without_tools_json() {
         tmp.path().join(".claude/tools.json").exists(),
         "expected tools.json to be created"
     );
-    let content = std::fs::read_to_string(tmp.path().join(".claude/tools.json")).unwrap();
+    let content = fs::read_to_string(tmp.path().join(".claude/tools.json")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert!(
         parsed.get("guardrails").is_some(),
@@ -304,7 +306,7 @@ fn hint_not_shown_after_tools_json_created() {
 #[test]
 fn hint_shown_when_tools_json_without_guardrails_key() {
     let tmp = tmp_repo_with_claude();
-    std::fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
+    fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
 
     let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -317,7 +319,7 @@ fn hint_shown_when_tools_json_without_guardrails_key() {
 #[test]
 fn no_hint_when_guardrails_configured() {
     let tmp = tmp_repo_with_claude();
-    std::fs::write(
+    fs::write(
         tmp.path().join(".claude/tools.json"),
         r#"{"guardrails": {}}"#,
     )

@@ -18,20 +18,20 @@ pub fn rule() -> Rule {
             for &(line_num, line) in lines {
                 if RE_EVAL_CALL.is_match(line) {
                     violations.push(Violation {
-                        rule: super::rule_id::EVAL.to_string(),
+                        rule: super::rule_id::EVAL.to_owned(),
                         severity: Severity::High,
                         fix: "Avoid eval(). Use JSON.parse() for data or safe alternatives."
-                            .to_string(),
-                        file: file_path.to_string(),
+                            .to_owned(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 } else if RE_FUNCTION_CTOR.is_match(line) {
                     violations.push(Violation {
-                        rule: super::rule_id::EVAL.to_string(),
+                        rule: super::rule_id::EVAL.to_owned(),
                         severity: Severity::High,
                         fix: "Avoid dynamic code generation with Function(). Use static functions."
-                            .to_string(),
-                        file: file_path.to_string(),
+                            .to_owned(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -51,7 +51,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

@@ -77,10 +77,10 @@ pub fn rule() -> Rule {
                     }
                     if sp.pattern.is_match(line) {
                         violations.push(Violation {
-                            rule: super::rule_id::HARDCODED_SECRET.to_string(),
+                            rule: super::rule_id::HARDCODED_SECRET.to_owned(),
                             severity: Severity::Critical,
-                            fix: sp.message.to_string(),
-                            file: file_path.to_string(),
+                            fix: sp.message.to_owned(),
+                            file: file_path.to_owned(),
                             line: Some(line_num),
                         });
                         break;
@@ -102,7 +102,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

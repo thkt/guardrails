@@ -2,20 +2,42 @@
 name = "guardrails"
 version = "0.14.1"
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-regex = "1"
-tempfile = "3"
-libc = "0.2"
-oxc_allocator = "0.121.0"
-oxc_parser = "0.121.0"
-oxc_ast = "0.121.0"
-oxc_span = "0.121.0"
-oxc_ast_visit = "0.121.0"
-ureq = "2"
+serde_json = ">=1"
+regex = ">=1"
+tempfile = ">=3"
+libc = ">=0.2"
+oxc_allocator = ">=0.121.0"
+oxc_parser = ">=0.121.0"
+oxc_ast = ">=0.121.0"
+oxc_span = ">=0.121.0"
+oxc_ast_visit = ">=0.121.0"
+ureq = ">=3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# absolute paths
+absolute_paths = "deny"
+# idiomatic iterators
+cast_possible_truncation = "deny"
+redundant_closure_for_method_calls = "deny"
+filter_map_next = "deny"
+flat_map_option = "deny"
+manual_filter_map = "deny"
+manual_find_map = "deny"
+# imports
+wildcard_imports = "deny"
+enum_glob_use = "deny"
+# strings
+str_to_string = "deny"
+# arguments
+needless_pass_by_value = "deny"
 
 [profile.release]
 opt-level = 3

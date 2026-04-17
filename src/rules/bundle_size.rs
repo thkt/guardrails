@@ -70,13 +70,13 @@ pub fn rule() -> Rule {
             for import in LARGE_IMPORTS.iter() {
                 if let Some(line_num) = find_match_in_lines(lines, import.pattern) {
                     violations.push(Violation {
-                        rule: super::rule_id::BUNDLE_SIZE.to_string(),
+                        rule: super::rule_id::BUNDLE_SIZE.to_owned(),
                         severity: Severity::Medium,
                         fix: format!(
                             "Full {} import increases bundle size. {}",
                             import.package, import.suggestion
                         ),
-                        file: file_path.to_string(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -95,7 +95,7 @@ mod tests {
         rule().check(
             content,
             "/src/utils/helper.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         )
     }
 

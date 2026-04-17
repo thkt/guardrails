@@ -1,6 +1,8 @@
 use crate::rules::Severity;
 use serde::Deserialize;
+use std::env;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 /// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
@@ -141,12 +143,12 @@ impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
     pub fn with_project_overrides(self) -> Result<Self, String> {
-        let cwd = std::env::current_dir()
-            .map_err(|e| format!("cannot determine working directory: {}", e))?;
+        let cwd =
+            env::current_dir().map_err(|e| format!("cannot determine working directory: {}", e))?;
         self.with_overrides_from_root(&cwd)
     }
 
-    fn with_overrides_from_root(mut self, start: &std::path::Path) -> Result<Self, String> {
+    fn with_overrides_from_root(mut self, start: &Path) -> Result<Self, String> {
         let Some(git_root) = Self::find_git_root(start) else {
             return Ok(self);
         };
@@ -162,7 +164,7 @@ impl Config {
                 }
                 return Ok(self);
             }
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e) if e.kind() != ErrorKind::NotFound => {
                 return Err(format!("cannot read config {:?}: {}", tools_path, e));
             }
             Err(_) => {}
@@ -175,7 +177,7 @@ impl Config {
                     .map_err(|e| format!("invalid project config {:?}: {}", legacy_path, e))?;
                 return Ok(self.merge(project));
             }
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e) if e.kind() != ErrorKind::NotFound => {
                 return Err(format!(
                     "cannot read project config {:?}: {}",
                     legacy_path, e
@@ -216,7 +218,7 @@ impl Config {
         self
     }
 
-    pub(crate) fn find_git_root(start: &std::path::Path) -> Option<PathBuf> {
+    pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
         start
             .ancestors()
             .find(|d| d.join(".git").exists())

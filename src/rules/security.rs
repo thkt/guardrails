@@ -103,10 +103,10 @@ pub fn rule() -> Rule {
                 for &(line_num, line) in lines {
                     if issue.pattern.is_match(line) {
                         violations.push(Violation {
-                            rule: super::rule_id::SECURITY.to_string(),
+                            rule: super::rule_id::SECURITY.to_owned(),
                             severity: issue.severity,
-                            fix: issue.fix.to_string(),
-                            file: file_path.to_string(),
+                            fix: issue.fix.to_owned(),
+                            file: file_path.to_owned(),
                             line: Some(line_num),
                         });
                     }
@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &crate::rules::non_comment_lines(content))
+        rule().check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

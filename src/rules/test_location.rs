@@ -24,11 +24,11 @@ pub fn rule() -> Rule {
             for pattern in TEST_PATTERNS.iter() {
                 if pattern.is_match(file_path) {
                     return vec![Violation {
-                        rule: super::rule_id::TEST_LOCATION.to_string(),
+                        rule: super::rule_id::TEST_LOCATION.to_owned(),
                         severity: Severity::Medium,
                         fix: "Test files should be in tests/ or __tests__/ directory outside src/"
-                            .to_string(),
-                        file: file_path.to_string(),
+                            .to_owned(),
+                        file: file_path.to_owned(),
                         line: None,
                     }];
                 }

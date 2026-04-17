@@ -22,6 +22,7 @@ mod transaction;
 use crate::config::Config;
 use regex::Regex;
 use serde::Deserialize;
+use std::fmt;
 use std::sync::LazyLock;
 
 pub(crate) mod rule_id {
@@ -82,7 +83,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
                 in_block = false;
                 let after = trimmed[pos + 2..].trim();
                 if !after.is_empty() && !is_line_comment(after) {
-                    result.push(((idx + 1) as u32, line));
+                    result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
                 }
             }
             continue;
@@ -92,7 +93,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
             if !trimmed[pos..].contains("*/") {
                 in_block = true;
                 if !before.is_empty() {
-                    result.push(((idx + 1) as u32, line));
+                    result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
                 }
                 continue;
             }
@@ -104,7 +105,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
         if is_line_comment(line) {
             continue;
         }
-        result.push(((idx + 1) as u32, line));
+        result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
     }
     result
 }
@@ -142,8 +143,8 @@ impl Severity {
     }
 }
 
-impl std::fmt::Display for Severity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Severity::Critical => "CRITICAL",
             Severity::High => "HIGH",
