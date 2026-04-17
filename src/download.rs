@@ -1,13 +1,16 @@
+use crate::resolve::run_with_timeout;
+use std::env;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const OXLINT_VERSION: &str = "1.56.0";
 
 const DOWNLOAD_BASE: &str = "https://github.com/oxc-project/oxc/releases/download";
 
 fn detect_platform() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    match (env::consts::OS, env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
         ("macos", "x86_64") => Some("x86_64-apple-darwin"),
         ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
@@ -21,11 +24,11 @@ fn download_url(version: &str, platform: &str) -> String {
 }
 
 fn default_cache_dir() -> Option<PathBuf> {
-    let cache_base = std::env::var("XDG_CACHE_HOME")
+    let cache_base = env::var("XDG_CACHE_HOME")
         .ok()
         .map(PathBuf::from)
         .or_else(|| {
-            std::env::var("HOME")
+            env::var("HOME")
                 .ok()
                 .map(|h| PathBuf::from(h).join(".cache"))
         })?;
@@ -51,8 +54,8 @@ where
     let platform = detect_platform().or_else(|| {
         eprintln!(
             "guardrails: unsupported platform for oxlint download (os={}, arch={})",
-            std::env::consts::OS,
-            std::env::consts::ARCH
+            env::consts::OS,
+            env::consts::ARCH
         );
         None
     })?;
@@ -74,7 +77,8 @@ fn fetch_url(url: &str) -> Option<Vec<u8>> {
         .ok()?;
 
     let mut bytes = Vec::new();
-    resp.into_reader()
+    resp.into_body()
+        .into_reader()
         .take(MAX_DOWNLOAD_SIZE)
         .read_to_end(&mut bytes)
         .map_err(|e| {
@@ -106,8 +110,8 @@ fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Option<PathBuf
         })
         .ok()?;
 
-    let output = crate::resolve::run_with_timeout(
-        std::process::Command::new("tar")
+    let output = run_with_timeout(
+        Command::new("tar")
             .args(["xzf"])
             .arg(&tar_path)
             .arg("-C")
@@ -228,7 +232,7 @@ mod tests {
         }
 
         let tar = staging.path().join("test.tar.gz");
-        assert!(std::process::Command::new("tar")
+        assert!(Command::new("tar")
             .args(["czf"])
             .arg(&tar)
             .arg("-C")

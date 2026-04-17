@@ -1,3 +1,4 @@
+use std::env;
 use std::io::Write;
 use std::path::Path;
 use tempfile::{Builder, NamedTempFile};
@@ -8,7 +9,7 @@ pub fn write_temp(content: &str, file_path: &str, tool: &str) -> Option<NamedTem
     let path = Path::new(file_path);
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
 
-    let temp_dir = std::env::temp_dir();
+    let temp_dir = env::temp_dir();
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
@@ -41,13 +42,14 @@ pub fn write_temp(content: &str, file_path: &str, tool: &str) -> Option<NamedTem
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Seek};
+    use std::fs;
+    use std::io::{Read, Seek, SeekFrom};
 
     #[test]
     fn creates_temp_file_with_correct_extension() {
         let tmp = tempfile::TempDir::new().unwrap();
         let file_path = tmp.path().join("src/app.tsx");
-        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
 
         let tf = write_temp("content", file_path.to_str().unwrap(), "test").unwrap();
         assert!(
@@ -64,7 +66,7 @@ mod tests {
 
         let mut tf = write_temp("hello world", file_path.to_str().unwrap(), "test").unwrap();
         let mut buf = String::new();
-        tf.as_file_mut().seek(std::io::SeekFrom::Start(0)).unwrap();
+        tf.as_file_mut().seek(SeekFrom::Start(0)).unwrap();
         tf.as_file_mut().read_to_string(&mut buf).unwrap();
         assert_eq!(buf, "hello world");
     }

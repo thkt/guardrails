@@ -20,10 +20,10 @@ pub fn rule() -> Rule {
                     let url_match = mat.as_str();
                     if !RE_LOCAL.is_match(url_match) {
                         violations.push(Violation {
-                            rule: super::rule_id::HTTP_RESOURCE.to_string(),
+                            rule: super::rule_id::HTTP_RESOURCE.to_owned(),
                             severity: Severity::Medium,
-                            fix: "Use HTTPS for external resources.".to_string(),
-                            file: file_path.to_string(),
+                            fix: "Use HTTPS for external resources.".to_owned(),
+                            file: file_path.to_owned(),
                             line: Some(line_num),
                         });
                         break;
@@ -45,7 +45,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]
@@ -91,7 +91,7 @@ mod tests {
         let result = rule.check(
             content,
             "/src/api.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         );
         assert_eq!(result.len(), 1);
     }

@@ -61,13 +61,13 @@ pub fn rule() -> Rule {
             for access in DOM_ACCESS.iter() {
                 if let Some(line_num) = find_match_in_lines(lines, access.pattern) {
                     violations.push(Violation {
-                        rule: super::rule_id::DOM_ACCESS.to_string(),
+                        rule: super::rule_id::DOM_ACCESS.to_owned(),
                         severity: Severity::Medium,
                         fix: format!(
                             "Avoid {} in React. Use useRef or React state instead.",
                             access.method
                         ),
-                        file: file_path.to_string(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -87,7 +87,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

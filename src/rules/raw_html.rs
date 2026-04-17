@@ -22,11 +22,11 @@ const JOIN_PROXIMITY_LINES: u32 = 5;
 
 fn make_violation(file_path: &str, line_num: u32) -> Violation {
     Violation {
-        rule: super::rule_id::RAW_HTML.to_string(),
+        rule: super::rule_id::RAW_HTML.to_owned(),
         severity: Severity::High,
         fix: "Use DOM APIs or framework templating instead of HTML string concatenation."
-            .to_string(),
-        file: file_path.to_string(),
+            .to_owned(),
+        file: file_path.to_owned(),
         line: Some(line_num),
     }
 }
@@ -78,7 +78,7 @@ mod tests {
         if !r.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &crate::rules::non_comment_lines(content))
+        r.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]
@@ -114,11 +114,11 @@ const html = parts.join('');"#;
 
     #[test]
     fn ignores_distant_join() {
-        let mut lines = vec![r#"const tags = ['<br>'];"#.to_string()];
+        let mut lines = vec![r#"const tags = ['<br>'];"#.to_owned()];
         for _ in 0..10 {
-            lines.push("const x = doSomething();".to_string());
+            lines.push("const x = doSomething();".to_owned());
         }
-        lines.push("const csv = values.join(',');".to_string());
+        lines.push("const csv = values.join(',');".to_owned());
         let content = lines.join("\n");
         assert!(check(&content, "/src/render.ts").is_empty());
     }

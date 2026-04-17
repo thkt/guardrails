@@ -21,6 +21,7 @@ pub fn with_parsed_program<R>(
     Some(f(&ret.program, &line_offsets))
 }
 
+#[allow(clippy::cast_possible_truncation)]
 pub fn span_to_line(offsets: &[usize], span: Span) -> u32 {
     scanner::offset_to_line(offsets, span.start as usize) as u32
 }

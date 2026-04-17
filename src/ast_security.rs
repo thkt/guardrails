@@ -1,6 +1,9 @@
 use crate::ast;
 use crate::rules::{rule_id, Severity, Violation};
-use oxc_ast::ast::*;
+use oxc_ast::ast::{
+    Argument, ArrayExpressionElement, BinaryOperator, CallExpression, Expression,
+    ObjectPropertyKind, Program, RegExpLiteral,
+};
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
 
@@ -34,16 +37,17 @@ pub fn check_program(
     visitor.violations
 }
 
+#[allow(clippy::cast_possible_truncation)]
 pub fn check_bidi(content: &str, file_path: &str, line_offsets: &[usize]) -> Option<Violation> {
     for (i, ch) in content.char_indices() {
         if is_bidi_char(ch) {
             let line = ast::span_to_line(line_offsets, Span::new(i as u32, i as u32));
             return Some(Violation {
-                rule: rule_id::BIDI_CHARACTERS.to_string(),
+                rule: rule_id::BIDI_CHARACTERS.to_owned(),
                 severity: Severity::High,
                 fix: "File contains Unicode bidirectional control characters (Trojan Source risk)."
-                    .to_string(),
-                file: file_path.to_string(),
+                    .to_owned(),
+                file: file_path.to_owned(),
                 line: Some(line),
             });
         }
@@ -64,10 +68,10 @@ impl SecurityVisitor<'_> {
 
     fn push_violation(&mut self, rule: &str, severity: Severity, fix: &str, span: Span) {
         self.violations.push(Violation {
-            rule: rule.to_string(),
+            rule: rule.to_owned(),
             severity,
-            fix: fix.to_string(),
-            file: self.file_path.to_string(),
+            fix: fix.to_owned(),
+            file: self.file_path.to_owned(),
             line: Some(self.span_to_line(span)),
         });
     }
@@ -356,6 +360,7 @@ fn has_nested_quantifiers(pattern: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn check_js(code: &str) -> Vec<Violation> {
         check(code, "/src/app.ts")
@@ -736,7 +741,7 @@ mod tests {
             "res.json({ error: 'oops' });\n",
             "res.json({ stack: err.stack });\n",
         );
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let iterations = 100;
         for _ in 0..iterations {
             let _ = check(content, "/src/handler.ts");

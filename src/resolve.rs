@@ -1,10 +1,12 @@
 use crate::parse_json::parse_linter_json;
 use crate::tempfile_util::write_temp;
 use serde::de::DeserializeOwned;
+use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const LINTER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -13,8 +15,8 @@ fn spawn_pipe_reader(
     pipe: impl Read + Send + 'static,
     tool: &'static str,
     label: &'static str,
-) -> std::thread::JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
+) -> JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
         let mut pipe = pipe;
         let mut buf = Vec::new();
         if let Err(e) = pipe.read_to_end(&mut buf) {
@@ -24,13 +26,10 @@ fn spawn_pipe_reader(
     })
 }
 
-fn wait_with_timeout(
-    child: std::process::Child,
-    tool: &'static str,
-) -> Option<std::process::ExitStatus> {
+fn wait_with_timeout(child: Child, tool: &'static str) -> Option<ExitStatus> {
     let child_pid = child.id();
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let mut child = child;
         let _ = tx.send(child.wait());
     });
@@ -49,10 +48,11 @@ fn wait_with_timeout(
             );
             #[cfg(unix)]
             {
-                // SAFETY: child_pid is from child.id() (valid PID on Unix).
-                unsafe {
-                    libc::kill(child_pid as i32, libc::SIGKILL);
-                }
+                let _ = Command::new("kill")
+                    .args(["-KILL", &child_pid.to_string()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
             }
             #[cfg(not(unix))]
             {
@@ -104,8 +104,8 @@ pub fn try_resolve_bin(name: &str, file_path: &str) -> Option<PathBuf> {
         .map(|d| d.join("node_modules/.bin").join(name))
         .find(|c| c.exists())
         .or_else(|| {
-            std::env::var("PATH").ok().and_then(|path_var| {
-                std::env::split_paths(&path_var)
+            env::var("PATH").ok().and_then(|path_var| {
+                env::split_paths(&path_var)
                     .map(|dir| dir.join(name))
                     .find(|candidate| candidate.exists())
             })
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn run_with_timeout_captures_stdout() {
-        let output = run_with_timeout(&mut Command::new("echo").arg("hello"), "test-echo").unwrap();
+        let output = run_with_timeout(Command::new("echo").arg("hello"), "test-echo").unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
             stdout.contains("hello"),
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn run_with_timeout_captures_stderr() {
         let output = run_with_timeout(
-            &mut Command::new("sh").args(["-c", "echo err >&2"]),
+            Command::new("sh").args(["-c", "echo err >&2"]),
             "test-stderr",
         )
         .unwrap();

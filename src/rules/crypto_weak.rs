@@ -62,13 +62,13 @@ pub fn rule() -> Rule {
             for crypto in WEAK_CRYPTO.iter() {
                 if let Some(line_num) = find_match_in_lines(lines, crypto.pattern) {
                     violations.push(Violation {
-                        rule: super::rule_id::CRYPTO_WEAK.to_string(),
+                        rule: super::rule_id::CRYPTO_WEAK.to_owned(),
                         severity: Severity::High,
                         fix: format!(
                             "{} is cryptographically weak. {}",
                             crypto.algorithm, crypto.suggestion
                         ),
-                        file: file_path.to_string(),
+                        file: file_path.to_owned(),
                         line: Some(line_num),
                     });
                 }
@@ -87,7 +87,7 @@ mod tests {
         rule().check(
             content,
             "/src/utils/hash.ts",
-            &crate::rules::non_comment_lines(content),
+            &super::super::non_comment_lines(content),
         )
     }
 

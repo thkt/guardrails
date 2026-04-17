@@ -20,10 +20,10 @@ pub fn rule() -> Rule {
             for pattern in GENERATED_PATTERNS.iter() {
                 if pattern.is_match(file_path) {
                     return vec![Violation {
-                        rule: super::rule_id::GENERATED_FILE.to_string(),
+                        rule: super::rule_id::GENERATED_FILE.to_owned(),
                         severity: Severity::High,
-                        fix: "Do not edit generated files directly. Modify the source and regenerate.".to_string(),
-                        file: file_path.to_string(),
+                        fix: "Do not edit generated files directly. Modify the source and regenerate.".to_owned(),
+                        file: file_path.to_owned(),
                         line: None,
                     }];
                 }
