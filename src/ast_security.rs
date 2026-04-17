@@ -334,21 +334,17 @@ fn has_nested_quantifiers(pattern: &str) -> bool {
                     i += 2;
                 }
             }
-            b')' => {
-                if depth > 0 {
-                    depth -= 1;
-                    if group_has_quantifier[depth]
-                        && i + 1 < bytes.len()
-                        && matches!(bytes[i + 1], b'+' | b'*' | b'?' | b'{')
-                    {
-                        return true;
-                    }
+            b')' if depth > 0 => {
+                depth -= 1;
+                if group_has_quantifier[depth]
+                    && i + 1 < bytes.len()
+                    && matches!(bytes[i + 1], b'+' | b'*' | b'?' | b'{')
+                {
+                    return true;
                 }
             }
-            b'+' | b'*' | b'?' | b'{' => {
-                if depth > 0 {
-                    group_has_quantifier[depth - 1] = true;
-                }
+            b'+' | b'*' | b'?' | b'{' if depth > 0 => {
+                group_has_quantifier[depth - 1] = true;
             }
             _ => {}
         }

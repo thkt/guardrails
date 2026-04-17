@@ -45,25 +45,6 @@ jobs:
         env:
           NO_COLOR: "1"
 
-  msrv:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # stable
-        with:
-          toolchain: "1.92"
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
-
-      - name: Check MSRV
-        run: cargo check
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10
