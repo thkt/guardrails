@@ -22,21 +22,21 @@ ureq = ">=3"
 unsafe_code = "forbid"
 
 [lints.clippy]
-# フルパス使用検出
+# absolute paths
 absolute_paths = "deny"
-# Rustイディオム (RUST.md idioms table)
+# idiomatic iterators
 cast_possible_truncation = "deny"
 redundant_closure_for_method_calls = "deny"
 filter_map_next = "deny"
 flat_map_option = "deny"
 manual_filter_map = "deny"
 manual_find_map = "deny"
-# インポート
+# imports
 wildcard_imports = "deny"
 enum_glob_use = "deny"
-# 文字列
+# strings
 str_to_string = "deny"
-# 引数
+# arguments
 needless_pass_by_value = "deny"
 
 [profile.release]
